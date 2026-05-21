@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-import time
 import logging
 
 logger = logging.getLogger("adu_bot.scraper")
