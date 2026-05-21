@@ -1,0 +1,11 @@
+[project]
+name = "adu-bot"
+version = "0.1.0"
+description = "ADÜ Hastane Randevu Takip & Onay Botu"
+requires-python = ">=3.9"
+dependencies = [
+    "python-telegram-bot[job-queue]==20.8",
+    "python-dotenv==1.0.1",
+    "requests==2.31.0",
+    "beautifulsoup4==4.12.3",
+]

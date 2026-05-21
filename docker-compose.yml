@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    container_name: adu_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./adu_bot.db:/app/adu_bot.db
+      - ./adu_bot.log:/app/adu_bot.log

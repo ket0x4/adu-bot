@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+adu_bot.db
+adu_bot.log
+.git/
+.env
+.DS_Store
