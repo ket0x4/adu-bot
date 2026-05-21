@@ -212,6 +212,24 @@ def get_profile_specialties(profile_id):
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+def get_profiles_specialties(profile_ids):
+    if not profile_ids:
+        return {}
+
+    placeholders = ", ".join(["?"] * len(profile_ids))
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM profile_specialties WHERE profile_id IN ({placeholders})", [int(pid) for pid in profile_ids])
+        rows = cursor.fetchall()
+
+        result = {}
+        for row in rows:
+            p_id = row['profile_id']
+            if p_id not in result:
+                result[p_id] = []
+            result[p_id].append(dict(row))
+        return result
+
 def clear_profile_specialties(profile_id):
     with get_connection() as conn:
         cursor = conn.cursor()

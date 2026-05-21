@@ -441,8 +441,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status_text += "👤 <b>Kayıtlı Hastalar ve Takip Listeleri:</b>\n"
             if not profiles:
                 status_text += "• Kayıtlı hasta profili yok."
+
+            # Optimized: Fetch all specialties for all profiles in one go
+            all_specs = db.get_profiles_specialties([p['id'] for p in profiles])
             for p in profiles:
-                specs = db.get_profile_specialties(p['id'])
+                specs = all_specs.get(p['id'], [])
                 spec_names = ", ".join([s['specialty_name'] for s in specs]) if specs else "Takip edilen bölüm yok"
                 status_text += f"• <b>{p['name']}</b>: <i>{spec_names}</i>\n"
                 
@@ -473,11 +476,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
                 
-            has_specs = False
-            for p in profiles:
-                if db.get_profile_specialties(p['id']):
-                    has_specs = True
-                    break
+            # Optimized: Check if any profile has specialties in one go
+            all_specs = db.get_profiles_specialties([p['id'] for p in profiles])
+            has_specs = len(all_specs) > 0
             if not has_specs:
                 await query.message.edit_text(
                     text="⚠️ <b>Tarama Başlatılamadı!</b>\n\nTaramayı başlatabilmek için en az 1 tane takip edilecek bölüm eklemelisiniz.",
@@ -502,8 +503,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 name=str(chat_id)
             )
             scan_details = ""
+            # Optimized: Use already fetched all_specs
             for p in profiles:
-                specs = db.get_profile_specialties(p['id'])
+                specs = all_specs.get(p['id'], [])
                 if specs:
                     spec_names = ", ".join([s['specialty_name'] for s in specs])
                     scan_details += f"• <b>{p['name']}</b>: <i>{spec_names}</i>\n"
