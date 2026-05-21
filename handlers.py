@@ -828,8 +828,9 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
         return
         
     # 2. Iterate through each profile
+    all_tracked_specs = db.get_profiles_specialties([p['id'] for p in profiles])
     for profile in profiles:
-        tracked_specs = db.get_profile_specialties(profile['id'])
+        tracked_specs = all_tracked_specs.get(profile['id'], [])
         if not tracked_specs:
             continue
             
