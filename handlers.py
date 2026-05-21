@@ -441,8 +441,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status_text += "👤 <b>Kayıtlı Hastalar ve Takip Listeleri:</b>\n"
             if not profiles:
                 status_text += "• Kayıtlı hasta profili yok."
+
+            # Batch fetch specialties for all profiles
+            profile_ids = [p['id'] for p in profiles]
+            all_specs = db.get_profiles_specialties_batch(profile_ids)
+
             for p in profiles:
-                specs = db.get_profile_specialties(p['id'])
+                specs = all_specs.get(p['id'], [])
                 spec_names = ", ".join([s['specialty_name'] for s in specs]) if specs else "Takip edilen bölüm yok"
                 status_text += f"• <b>{p['name']}</b>: <i>{spec_names}</i>\n"
                 
@@ -474,10 +479,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
                 
             has_specs = False
-            for p in profiles:
-                if db.get_profile_specialties(p['id']):
-                    has_specs = True
-                    break
+            profile_ids = [p['id'] for p in profiles]
+            all_specs = db.get_profiles_specialties_batch(profile_ids)
+            if any(all_specs.values()):
+                has_specs = True
+
             if not has_specs:
                 await query.message.edit_text(
                     text="⚠️ <b>Tarama Başlatılamadı!</b>\n\nTaramayı başlatabilmek için en az 1 tane takip edilecek bölüm eklemelisiniz.",
@@ -502,8 +508,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 name=str(chat_id)
             )
             scan_details = ""
+            # all_specs already fetched above
             for p in profiles:
-                specs = db.get_profile_specialties(p['id'])
+                specs = all_specs.get(p['id'], [])
                 if specs:
                     spec_names = ", ".join([s['specialty_name'] for s in specs])
                     scan_details += f"• <b>{p['name']}</b>: <i>{spec_names}</i>\n"
@@ -717,8 +724,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⚠️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
             )
             keyboard = []
+            chat_ids = [u['chat_id'] for u in filtered_users]
+            all_user_profiles = db.get_users_profiles_batch(chat_ids)
+
             for u in filtered_users:
-                profiles = db.get_profiles(u['chat_id'])
+                profiles = all_user_profiles.get(u['chat_id'], [])
                 profiles_str = f"({len(profiles)} Profil)" if profiles else "(Profil yok)"
                 keyboard.append([
                     InlineKeyboardButton(f"❌ Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
@@ -810,8 +820,11 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
         return
         
     # 2. Iterate through each profile
+    profile_ids = [p['id'] for p in profiles]
+    all_tracked_specs = db.get_profiles_specialties_batch(profile_ids)
+
     for profile in profiles:
-        tracked_specs = db.get_profile_specialties(profile['id'])
+        tracked_specs = all_tracked_specs.get(profile['id'], [])
         if not tracked_specs:
             continue
             

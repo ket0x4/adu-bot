@@ -172,6 +172,23 @@ def get_profiles(chat_id):
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+def get_users_profiles_batch(chat_ids):
+    if not chat_ids:
+        return {}
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ', '.join(['?'] * len(chat_ids))
+        cursor.execute(f"SELECT * FROM profiles WHERE chat_id IN ({placeholders})", [str(c_id) for c_id in chat_ids])
+        rows = cursor.fetchall()
+
+        result = {}
+        for row in rows:
+            c_id = row['chat_id']
+            if c_id not in result:
+                result[c_id] = []
+            result[c_id].append(dict(row))
+        return result
+
 def get_profile_by_id(profile_id):
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -211,6 +228,23 @@ def get_profile_specialties(profile_id):
         cursor.execute("SELECT * FROM profile_specialties WHERE profile_id = ?", (int(profile_id),))
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+def get_profiles_specialties_batch(profile_ids):
+    if not profile_ids:
+        return {}
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ', '.join(['?'] * len(profile_ids))
+        cursor.execute(f"SELECT * FROM profile_specialties WHERE profile_id IN ({placeholders})", profile_ids)
+        rows = cursor.fetchall()
+
+        result = {}
+        for row in rows:
+            p_id = row['profile_id']
+            if p_id not in result:
+                result[p_id] = []
+            result[p_id].append(dict(row))
+        return result
 
 def clear_profile_specialties(profile_id):
     with get_connection() as conn:
