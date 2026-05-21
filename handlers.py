@@ -1,5 +1,6 @@
 import re
 import time
+import asyncio
 import secrets
 import string
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -843,14 +844,14 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
             config.logger.info(f"Tracked department '{tracked['specialty_name']}' is ACTIVE on site as '{active_name}' (ID: {active_id}).")
             
             # 3. Fetch polyclinics
-            time.sleep(1.5)
+            await asyncio.sleep(1.5)
             polyclinics = scraper.get_polyclinics(active_id)
             if not polyclinics:
                 continue
                 
             # 4. Check slots
             for poly in polyclinics:
-                time.sleep(1.5)
+                await asyncio.sleep(1.5)
                 slots = scraper.check_slots(active_id, poly['id'])
                 if not slots:
                     continue
