@@ -172,6 +172,14 @@ def get_profiles(chat_id):
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+def get_profiles_counts():
+    """Returns a dictionary mapping chat_id to the number of profiles they have."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT chat_id, COUNT(*) as count FROM profiles GROUP BY chat_id")
+        rows = cursor.fetchall()
+        return {str(row['chat_id']): row['count'] for row in rows}
+
 def get_profile_by_id(profile_id):
     with get_connection() as conn:
         cursor = conn.cursor()

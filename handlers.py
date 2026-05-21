@@ -41,6 +41,33 @@ def make_token():
     chars = string.ascii_uppercase + string.digits
     return f"ADU-{''.join(secrets.SystemRandom().choices(chars, k=4))}-{''.join(secrets.SystemRandom().choices(chars, k=4))}"
 
+def get_admin_users_view():
+    """Helper to generate the text and keyboard for the authorized users list in Admin Panel"""
+    users = db.get_authorized_users()
+    filtered_users = [u for u in users if str(u['chat_id']) != config.ADMIN_CHAT_ID]
+
+    if not filtered_users:
+        text = "👥 <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
+        keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
+    else:
+        text = (
+            "👥 <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
+            "Aşağıdaki listede her kullanıcının Telegram ID'si ve eklediği kişilerin sayısı gösterilmektedir.\n\n"
+            "⚠️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
+        )
+        keyboard = []
+        profile_counts = db.get_profiles_counts()
+        for u in filtered_users:
+            chat_id_str = str(u['chat_id'])
+            count = profile_counts.get(chat_id_str, 0)
+            profiles_str = f"({count} Profil)" if count > 0 else "(Profil yok)"
+            keyboard.append([
+                InlineKeyboardButton(f"❌ Revoke ID: {chat_id_str} {profiles_str}", callback_data=f"admin:revoke:{chat_id_str}")
+            ])
+        keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
+
+    return text, InlineKeyboardMarkup(keyboard)
+
 # --- Command Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -706,31 +733,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
             return
             
-        users = db.get_authorized_users()
-        filtered_users = [u for u in users if str(u['chat_id']) != config.ADMIN_CHAT_ID]
-        
-        if not filtered_users:
-            users_text = "👥 <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
-            keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
-        else:
-            users_text = (
-                "👥 <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
-                "Aşağıdaki listede her kullanıcının Telegram ID'si ve eklediği kişilerin sayısı gösterilmektedir.\n\n"
-                "⚠️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
-            )
-            keyboard = []
-            for u in filtered_users:
-                profiles = db.get_profiles(u['chat_id'])
-                profiles_str = f"({len(profiles)} Profil)" if profiles else "(Profil yok)"
-                keyboard.append([
-                    InlineKeyboardButton(f"❌ Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
-                ])
-            keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
-            
+        users_text, users_markup = get_admin_users_view()
         await query.message.edit_text(
             text=users_text,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=users_markup
         )
         
     # Admin: Perform User Revocation
@@ -761,31 +768,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.answer(f"Kullanıcı yetkisi iptal edildi (Revoked): {user_to_revoke}", show_alert=True)
         
-        users = db.get_authorized_users()
-        filtered_users = [u for u in users if str(u['chat_id']) != config.ADMIN_CHAT_ID]
-        
-        if not filtered_users:
-            users_text = "👥 <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
-            keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
-        else:
-            users_text = (
-                "👥 <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
-                "Aşağıdaki listede her kullanıcının Telegram ID'si ve eklediği kişilerin sayısı gösterilmektedir.\n\n"
-                "⚠️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
-            )
-            keyboard = []
-            for u in filtered_users:
-                profiles = db.get_profiles(u['chat_id'])
-                profiles_str = f"({len(profiles)} Profil)" if profiles else "(Profil yok)"
-                keyboard.append([
-                    InlineKeyboardButton(f"❌ Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
-                ])
-            keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
-            
+        users_text, users_markup = get_admin_users_view()
         await query.message.edit_text(
             text=users_text,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=users_markup
         )
 
 # --- Background Scanning Job Callback ---
