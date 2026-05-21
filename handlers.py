@@ -49,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Intercept unauthorized users
     if not check_auth(chat_id):
         unauth_msg = (
-            "⚠️ <b>Erişim Yetkiniz Yok!</b>\n\n"
+            "️ <b>Erişim Yetkiniz Yok!</b>\n\n"
             "Bu bot kişiye özel olarak yapılandırılmıştır ve sadece yetkili kişilerin kullanmasına izin verilir.\n\n"
             "Lütfen devam etmek için sistem yöneticisi (admin) tarafından size tanımlanan tek kullanımlık <b>Davet Kodunu</b> "
             "(Örn: <code>ADU-XXXX-XXXX</code>) doğrudan bu sohbete mesaj olarak gönderin:"
@@ -63,10 +63,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('adding_profile', None)
     
     welcome_text = (
-        "🏥 <b>ADÜ Hastane Randevu Takip & Onay Botu</b>'na hoş geldiniz!\n\n"
+        " <b>ADÜ Hastane Randevu Takip & Onay Botu</b>'na hoş geldiniz!\n\n"
         "Bu bot, Aydın Adnan Menderes Üniversitesi online randevu sisteminde boş slot "
         "bulunduğunda size bildirim atar ve <b>tek tıkla randevu kaydı</b> almanızı sağlar.\n\n"
-        "🌟 <b>Özellikler:</b>\n"
+        " <b>Özellikler:</b>\n"
         "• Çoklu Profil: Kendiniz, anne, baba veya arkadaşlarınız için profiller ekleyin.\n"
         "• Dinamik Takip: İstediğiniz bölümleri profil bazında takip listenize ekleyin.\n"
         "• Arka Plan Tarama: Belirlediğiniz süre aralığıyla otomatik tarama yapın.\n"
@@ -95,21 +95,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.set_user_authorized(chat_id, True)
                 
                 success_auth = (
-                    "🎉 <b>Davet Kodunuz Başarıyla Doğrulandı!</b>\n\n"
+                    " <b>Davet Kodunuz Başarıyla Doğrulandı!</b>\n\n"
                     "Bot için tam erişim yetkiniz kalıcı olarak tanımlanmıştır.\n\n"
                     "Lütfen <b>/start</b> yazarak ana kontrol menüsüne gidin ve ilk profilinizi oluşturarak takibi başlatın!"
                 )
                 await update.message.reply_text(text=success_auth, parse_mode="HTML")
             else:
                 await update.message.reply_text(
-                    text="⚠️ <b>Bu davet kodu zaten kullanılmış!</b>\n\n"
+                    text="️ <b>Bu davet kodu zaten kullanılmış!</b>\n\n"
                          "Lütfen yeni bir davet kodu girmeyi deneyin:",
                     parse_mode="HTML"
                 )
             return
         else:
             await update.message.reply_text(
-                text="⚠️ <b>Yetkisiz Giriş veya Geçersiz Davet Kodu!</b>\n\n"
+                text="️ <b>Yetkisiz Giriş veya Geçersiz Davet Kodu!</b>\n\n"
                      "Lütfen size gönderilen davet kodunu doğru girdiğinizden emin olun (Örn: <code>ADU-XXXX-XXXX</code>):",
                 parse_mode="HTML"
             )
@@ -124,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wizard['name'] = text
             wizard['step'] = 'tc'
             await update.message.reply_text(
-                text=f"👤 Profil: <b>{text}</b>\n\n"
+                text=f" Profil: <b>{text}</b>\n\n"
                      f"Lütfen bu kişi için 11 haneli <b>T.C. Kimlik Numarasını</b> girin:",
                 parse_mode="HTML"
             )
@@ -133,7 +133,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == 'tc':
             if not text.isdigit() or len(text) != 11:
                 await update.message.reply_text(
-                    text="⚠️ <b>Hatalı T.C. Kimlik Numarası!</b>\n"
+                    text="️ <b>Hatalı T.C. Kimlik Numarası!</b>\n"
                          "Lütfen tam olarak 11 haneli bir sayı girin:",
                     parse_mode="HTML"
                 )
@@ -141,8 +141,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wizard['tc'] = text
             wizard['step'] = 'birth'
             await update.message.reply_text(
-                text=f"👤 Profil: <b>{wizard['name']}</b>\n"
-                     f"🆔 T.C.: <code>{text[:3]}********</code>\n\n"
+                text=f" Profil: <b>{wizard['name']}</b>\n"
+                     f" T.C.: <code>{text[:3]}********</code>\n\n"
                      f"Lütfen doğum tarihini <b>GG.AA.YYYY</b> formatında girin (Örn: <code>15.08.1985</code>):",
                 parse_mode="HTML"
             )
@@ -151,7 +151,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == 'birth':
             if not re.match(r'^\d{2}\.\d{2}\.\d{4}$', text):
                 await update.message.reply_text(
-                    text="⚠️ <b>Hatalı Doğum Tarihi Formatı!</b>\n"
+                    text="️ <b>Hatalı Doğum Tarihi Formatı!</b>\n"
                          "Lütfen tarihi tam olarak GG.AA.YYYY formatında girin (Örn: <code>15.08.1985</code>):",
                     parse_mode="HTML"
                 )
@@ -159,8 +159,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wizard['birth'] = text
             wizard['step'] = 'phone'
             await update.message.reply_text(
-                text=f"👤 Profil: <b>{wizard['name']}</b>\n"
-                     f"📅 Doğum Tarihi: <code>{text}</code>\n\n"
+                text=f" Profil: <b>{wizard['name']}</b>\n"
+                     f" Doğum Tarihi: <code>{text}</code>\n\n"
                      f"Lütfen <b>telefon numarasını</b> 11 haneli ve 0 ile başlayacak şekilde girin (Örn: <code>05051234567</code>):",
                 parse_mode="HTML"
             )
@@ -169,7 +169,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif step == 'phone':
             if not text.isdigit() or len(text) != 11 or not text.startswith("0"):
                 await update.message.reply_text(
-                    text="⚠️ <b>Hatalı Telefon Numarası!</b>\n"
+                    text="️ <b>Hatalı Telefon Numarası!</b>\n"
                          "Telefon numarası `05` ile başlayan 11 haneli bir sayı olmalıdır (Örn: <code>05051234567</code>):",
                     parse_mode="HTML"
                 )
@@ -188,15 +188,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('adding_profile', None)
             
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("👤 Profillerime Git", callback_data="menu:profiles")
+                InlineKeyboardButton(" Profillerime Git", callback_data="menu:profiles")
             ]])
             
             await update.message.reply_text(
-                text=f"✅ <b>Profil Başarıyla Oluşturuldu!</b>\n\n"
-                     f"👤 <b>İsim/Etiket:</b> {profile_name}\n"
-                     f"🆔 <b>T.C. Kimlik:</b> <code>{wizard['tc'][:3]}******</code>\n"
-                     f"📅 <b>Doğum Tarihi:</b> {wizard['birth']}\n"
-                     f"📞 <b>Telefon:</b> {text}\n\n"
+                text=f" <b>Profil Başarıyla Oluşturuldu!</b>\n\n"
+                     f" <b>İsim/Etiket:</b> {profile_name}\n"
+                     f" <b>T.C. Kimlik:</b> <code>{wizard['tc'][:3]}******</code>\n"
+                     f" <b>Doğum Tarihi:</b> {wizard['birth']}\n"
+                     f" <b>Telefon:</b> {text}\n\n"
                      f"Artık bu profil için takip listesi oluşturabilirsiniz.",
                 parse_mode="HTML",
                 reply_markup=keyboard
@@ -205,7 +205,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     # Default text response if not in wizard
     await update.message.reply_text(
-        text="⚠️ Anlaşılmadı. Menüyü açmak için lütfen /start yazın."
+        text="️ Anlaşılmadı. Menüyü açmak için lütfen /start yazın."
     )
 
 # --- Callback Query Handler ---
@@ -216,7 +216,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 1. Intercept unauthorized callback clicks
     if not check_auth(chat_id):
-        await query.answer("⚠️ Erişim yetkiniz yok!", show_alert=True)
+        await query.answer("️ Erişim yetkiniz yok!", show_alert=True)
         return
         
     db.ensure_user_exists(chat_id)
@@ -229,7 +229,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. Main Menu
     if query.data == "menu:main":
         await query.message.edit_text(
-            text="🏥 <i>Lütfen aşağıdaki menüden işlem seçin:</i>",
+            text=" <i>Lütfen aşağıdaki menüden işlem seçin:</i>",
             parse_mode="HTML",
             reply_markup=keyboards.get_main_keyboard(chat_id)
         )
@@ -238,9 +238,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "menu:profiles":
         profiles = db.get_profiles(chat_id)
         if not profiles:
-            text = "👤 <b>Kayıtlı profiliniz bulunmamaktadır.</b>\n\nLütfen randevu takibi yapabilmek için 'Yeni Profil Ekle' butonuna basarak ilk profilinizi oluşturun."
+            text = " <b>Kayıtlı profiliniz bulunmamaktadır.</b>\n\nLütfen randevu takibi yapabilmek için 'Yeni Profil Ekle' butonuna basarak ilk profilinizi oluşturun."
         else:
-            text = "👤 <b>Kayıtlı Profilleriniz:</b>\n\nİstediğiniz profilin detaylarını görmek veya silmek için ilgili isme tıklayın."
+            text = " <b>Kayıtlı Profilleriniz:</b>\n\nİstediğiniz profilin detaylarını görmek veya silmek için ilgili isme tıklayın."
         
         await query.message.edit_text(
             text=text,
@@ -252,7 +252,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "profile:add":
         context.user_data['adding_profile'] = {'step': 'name'}
         await query.message.edit_text(
-            text="👤 <b>Yeni Profil Ekleme Sihirbazı</b>\n\n"
+            text=" <b>Yeni Profil Ekleme Sihirbazı</b>\n\n"
                  "Lütfen eklemek istediğiniz kişinin adını veya etiketini yazın (Örn: <code>Kendim</code>, <code>Annem</code>, <code>Babam</code>):",
             parse_mode="HTML"
         )
@@ -266,11 +266,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         details = (
-            f"👤 <b>Profil Detayları:</b>\n\n"
-            f"🏷️ <b>İsim/Etiket:</b> {profile['name']}\n"
-            f"🆔 <b>T.C. Kimlik:</b> <code>{profile['tc_kimlik'][:3]}******{profile['tc_kimlik'][-2:]}</code>\n"
-            f"📅 <b>Doğum Tarihi:</b> {profile['dogum_tarihi']}\n"
-            f"📞 <b>Telefon:</b> {profile['telefon']}\n"
+            f" <b>Profil Detayları:</b>\n\n"
+            f"️ <b>İsim/Etiket:</b> {profile['name']}\n"
+            f" <b>T.C. Kimlik:</b> <code>{profile['tc_kimlik'][:3]}******{profile['tc_kimlik'][-2:]}</code>\n"
+            f" <b>Doğum Tarihi:</b> {profile['dogum_tarihi']}\n"
+            f" <b>Telefon:</b> {profile['telefon']}\n"
         )
         await query.message.edit_text(
             text=details,
@@ -284,7 +284,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         profile = db.get_profile_by_id(profile_id)
         if profile:
             db.delete_profile(chat_id, profile['name'])
-            text = f"✅ <b>{profile['name']}</b> isimli profil başarıyla silindi."
+            text = f" <b>{profile['name']}</b> isimli profil başarıyla silindi."
         else:
             text = "Hata: Profil bulunamadı."
             
@@ -299,14 +299,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         profiles = db.get_profiles(chat_id)
         if not profiles:
             await query.message.edit_text(
-                text="⚠️ <b>Profil Bulunamadı!</b>\n\nRandevu bölümlerini takip edebilmek için öncelikle en az bir profil oluşturmalısınız.",
+                text="️ <b>Profil Bulunamadı!</b>\n\nRandevu bölümlerini takip edebilmek için öncelikle en az bir profil oluşturmalısınız.",
                 parse_mode="HTML",
                 reply_markup=keyboards.get_main_keyboard(chat_id)
             )
             return
             
         await query.message.edit_text(
-            text="🏥 <b>Bölüm Takip Listesi</b>\n\nHangi profil için randevu bölümlerini yönetmek istiyorsunuz?",
+            text=" <b>Bölüm Takip Listesi</b>\n\nHangi profil için randevu bölümlerini yönetmek istiyorsunuz?",
             parse_mode="HTML",
             reply_markup=keyboards.get_tracking_keyboard(chat_id)
         )
@@ -321,12 +321,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         tracked = db.get_profile_specialties(profile_id)
         if not tracked:
-            text = f"🏥 <b>{profile['name']}</b> için takip edilen bölüm yok.\n\nAşağıdaki 'Bölüm Ekle' butonuna basarak takip etmek istediğiniz bölümleri ekleyebilirsiniz."
+            text = f" <b>{profile['name']}</b> için takip edilen bölüm yok.\n\nAşağıdaki 'Bölüm Ekle' butonuna basarak takip etmek istediğiniz bölümleri ekleyebilirsiniz."
         else:
-            text = f"🏥 <b>{profile['name']} için Takip Edilen Bölümler:</b>\n\n"
+            text = f" <b>{profile['name']} için Takip Edilen Bölümler:</b>\n\n"
             for t in tracked:
                 text += f"• {t['specialty_name']}\n"
-            text += "\n<i>Bir bölümün takibini durdurmak için aşağıdaki ilgili ismin yanındaki [❌] butonuna basın:</i>"
+            text += "\n<i>Bir bölümün takibini durdurmak için aşağıdaki ilgili ismin yanındaki [] butonuna basın:</i>"
             
         await query.message.edit_text(
             text=text,
@@ -336,16 +336,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     # 9. Specialty Add Options
     elif query.data.startswith("track:add:"):
-        profile_id = int(query.data.split(":")[-1])
+        parts = query.data.split(":")
+        profile_id = int(parts[2])
+        page = int(parts[3]) if len(parts) > 3 else 0
         profile = db.get_profile_by_id(profile_id)
         if not profile:
             await query.message.edit_text("Hata: Profil bulunamadı.", reply_markup=keyboards.get_main_keyboard(chat_id))
             return
             
         await query.message.edit_text(
-            text=f"🏥 <b>{profile['name']} için Bölüm Ekle</b>\n\nTakip listenize eklemek istediğiniz uzmanlık alanını seçin:",
+            text=f"<b>{profile['name']} için Bölüm Ekle</b>\n\nTakip listenize eklemek istediğiniz uzmanlık alanını seçin:",
             parse_mode="HTML",
-            reply_markup=keyboards.get_track_add_keyboard(profile_id)
+            reply_markup=keyboards.get_track_add_keyboard(profile_id, page=page)
         )
         
     # 10. Perform Specialty Addition
@@ -359,7 +361,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if profile:
             db.add_profile_specialty(profile_id, spec_id, spec_name)
-            text = f"✅ <b>{spec_name}</b> bölümü <b>{profile['name']}</b>'in takip listesine eklendi."
+            text = f"<b>{spec_name}</b> bölümü <b>{profile['name']}</b>'in takip listesine eklendi."
         else:
             text = "Hata: Profil bulunamadı."
             
@@ -378,7 +380,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         profile = db.get_profile_by_id(profile_id)
         if profile:
             db.remove_profile_specialty(profile_id, spec_id)
-            text = "✅ Bölüm takibi başarıyla kaldırıldı."
+            text = " Bölüm takibi başarıyla kaldırıldı."
         else:
             text = "Hata: Profil bulunamadı."
             
@@ -391,9 +393,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 12. Settings (Interval Options)
     elif query.data == "menu:settings":
         await query.message.edit_text(
-            text="⚙️ <b>Sorgulama Sıklığı Ayarı</b>\n\n"
+            text="️ <b>Sorgulama Sıklığı Ayarı</b>\n\n"
                  "Botun arka planda boş randevuları kontrol etme sıklığını seçin (varsayılan 15 dakikadır):\n\n"
-                 "⚠️ <i>Sorgulama sıklığının çok kısa olması IP adresinin hastane sunucuları tarafından geçici engellenmesine yol açabilir. 10 veya 15 dakika önerilir.</i>",
+                 "️ <i>Sorgulama sıklığının çok kısa olması IP adresinin hastane sunucuları tarafından geçici engellenmesine yol açabilir. 10 veya 15 dakika önerilir.</i>",
             parse_mode="HTML",
             reply_markup=keyboards.get_settings_keyboard(chat_id)
         )
@@ -420,7 +422,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         await query.message.edit_text(
-            text=f"⚙️ Sorgulama sıklığı başarıyla <b>{interval} dakika</b> olarak ayarlandı.",
+            text=f"️ Sorgulama sıklığı başarıyla <b>{interval} dakika</b> olarak ayarlandı.",
             parse_mode="HTML",
             reply_markup=keyboards.get_settings_keyboard(chat_id)
         )
@@ -430,15 +432,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = db.get_user(chat_id)
         profiles = db.get_profiles(chat_id)
         
-        status_text = "🔄 <b>Sistem Durumu ve Bilgileri</b>\n\n"
+        status_text = " <b>Sistem Durumu ve Bilgileri</b>\n\n"
         if not user:
             status_text += "Durum: Başlatılmadı."
         else:
-            status_state = "🟢 TARAMA AKTİF" if user['is_scanning'] else "🔴 TARAMA DURDURULDU"
-            status_text += f"⚙️ <b>Tarama Durumu:</b> {status_state}\n"
-            status_text += f"⏰ <b>Sorgulama Aralığı:</b> {user['scan_interval']} dakika\n\n"
+            status_state = " TARAMA AKTİF" if user['is_scanning'] else " TARAMA DURDURULDU"
+            status_text += f"️ <b>Tarama Durumu:</b> {status_state}\n"
+            status_text += f" <b>Sorgulama Aralığı:</b> {user['scan_interval']} dakika\n\n"
             
-            status_text += "👤 <b>Kayıtlı Hastalar ve Takip Listeleri:</b>\n"
+            status_text += " <b>Kayıtlı Hastalar ve Takip Listeleri:</b>\n"
             if not profiles:
                 status_text += "• Kayıtlı hasta profili yok."
 
@@ -472,7 +474,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Prevent starting if no profiles or tracked specialties exist
             if not profiles:
                 await query.message.edit_text(
-                    text="⚠️ <b>Tarama Başlatılamadı!</b>\n\nTaramayı başlatabilmek için en az 1 adet profil oluşturmalısınız.",
+                    text="️ <b>Tarama Başlatılamadı!</b>\n\nTaramayı başlatabilmek için en az 1 adet profil oluşturmalısınız.",
                     parse_mode="HTML",
                     reply_markup=keyboards.get_main_keyboard(chat_id)
                 )
@@ -486,7 +488,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if not has_specs:
                 await query.message.edit_text(
-                    text="⚠️ <b>Tarama Başlatılamadı!</b>\n\nTaramayı başlatabilmek için en az 1 tane takip edilecek bölüm eklemelisiniz.",
+                    text="️ <b>Tarama Başlatılamadı!</b>\n\nTaramayı başlatabilmek için en az 1 tane takip edilecek bölüm eklemelisiniz.",
                     parse_mode="HTML",
                     reply_markup=keyboards.get_main_keyboard(chat_id)
                 )
@@ -516,8 +518,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     scan_details += f"• <b>{p['name']}</b>: <i>{spec_names}</i>\n"
 
             text = (
-                "🟢 <b>Otomatik tarama başarıyla BAŞLATILDI.</b>\n\n"
-                "🔍 <b>Aktif Takip Listesi:</b>\n"
+                " <b>Otomatik tarama başarıyla BAŞLATILDI.</b>\n\n"
+                " <b>Aktif Takip Listesi:</b>\n"
                 f"{scan_details}\n"
                 "Bot arka planda sürekli olarak hastane sistemini sorgulayacak ve boş randevu yakaladığında sizi anında uyaracaktır."
             )
@@ -528,7 +530,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             jobs = context.job_queue.get_jobs_by_name(str(chat_id))
             for job in jobs:
                 job.schedule_removal()
-            text = "🔴 <b>Otomatik tarama DURDURULDU.</b>\n\nArka plan sorgulamaları sonlandırıldı. İstediğiniz zaman tekrar başlatabilirsiniz."
+            text = " <b>Otomatik tarama DURDURULDU.</b>\n\nArka plan sorgulamaları sonlandırıldı. İstediğiniz zaman tekrar başlatabilirsiniz."
             
         await query.message.edit_text(
             text=text,
@@ -551,7 +553,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         # Give immediate feedback to prevent double clicking
         await query.edit_message_text(
-            text=query.message.text + f"\n\n⏳ <b>{profile['name']} için randevu alma işlemi başlatıldı... Lütfen bekleyin.</b>",
+            text=query.message.text + f"\n\n <b>{profile['name']} için randevu alma işlemi başlatıldı... Lütfen bekleyin.</b>",
             parse_mode="HTML"
         )
         
@@ -570,16 +572,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if success:
             finished_text = (
                 query.message.text + 
-                f"\n\n✅ <b>Randevu Alma İşlemi Başarılı!</b>\n"
-                f"🎉 Hastane Mesajı: <i>{message}</i>"
+                f"\n\n <b>Randevu Alma İşlemi Başarılı!</b>\n"
+                f" Hastane Mesajı: <i>{message}</i>"
             )
             await query.edit_message_text(text=finished_text, parse_mode="HTML")
-            await query.answer("Randevunuz başarıyla alınmıştır! 🎉", show_alert=True)
+            await query.answer("Randevunuz başarıyla alınmıştır! ", show_alert=True)
         else:
             failed_text = (
                 query.message.text + 
-                f"\n\n❌ <b>Randevu Alınamadı!</b>\n"
-                f"⚠️ Hata Nedeni: <i>{message}</i>"
+                f"\n\n <b>Randevu Alınamadı!</b>\n"
+                f"️ Hata Nedeni: <i>{message}</i>"
             )
             await query.edit_message_text(text=failed_text, parse_mode="HTML")
             await query.answer(f"Randevu alma başarısız oldu: {message}", show_alert=True)
@@ -589,7 +591,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin Panel Main View
     elif query.data == "menu:admin":
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
-            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            await query.answer("️ Yetkiniz yok!", show_alert=True)
             return
             
         unused_tokens = db.get_unused_tokens()
@@ -597,22 +599,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auth_users_count = len([u for u in auth_users if str(u['chat_id']) != config.ADMIN_CHAT_ID])
         
         admin_text = (
-            f"🔑 <b>ADÜ Bot Yetki Yönetim Paneli</b>\n\n"
-            f"👥 <b>Yetkili Aktif Kullanıcılar:</b> {auth_users_count} kişi (Siz hariç)\n"
-            f"📜 <b>Kullanılmamış Davet Kodları:</b> {len(unused_tokens)} adet\n\n"
+            f" <b>ADÜ Bot Yetki Yönetim Paneli</b>\n\n"
+            f" <b>Yetkili Aktif Kullanıcılar:</b> {auth_users_count} kişi (Siz hariç)\n"
+            f" <b>Kullanılmamış Davet Kodları:</b> {len(unused_tokens)} adet\n\n"
             f"Aşağıdaki butonları kullanarak davet kodları üretebilir, kullanılmamış kodları iptal edebilir veya aktif kullanıcıların yetkilerini (Revoke) silebilirsiniz."
         )
         
         keyboard = [
             [
-                InlineKeyboardButton("➕ Davet Kodu Üret", callback_data="admin:gen_token"),
-                InlineKeyboardButton("📜 Aktif Kodları Gör", callback_data="admin:list_tokens")
+                InlineKeyboardButton(" Davet Kodu Üret", callback_data="admin:gen_token"),
+                InlineKeyboardButton(" Aktif Kodları Gör", callback_data="admin:list_tokens")
             ],
             [
-                InlineKeyboardButton("👥 Kullanıcıları Listele", callback_data="admin:list_users")
+                InlineKeyboardButton(" Kullanıcıları Listele", callback_data="admin:list_users")
             ],
             [
-                InlineKeyboardButton("🔙 Ana Menü", callback_data="menu:main")
+                InlineKeyboardButton(" Ana Menü", callback_data="menu:main")
             ]
         ]
         
@@ -625,22 +627,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin: Generate Invitation Code
     elif query.data == "admin:gen_token":
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
-            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            await query.answer("️ Yetkiniz yok!", show_alert=True)
             return
             
         token = make_token()
         db.add_invitation_token(token)
         
         token_text = (
-            f"✅ <b>Yeni Tek Kullanımlık Davet Kodu Üretildi!</b>\n\n"
-            f"🔑 <b>Kod:</b> <code>{token}</code>\n\n"
+            f" <b>Yeni Tek Kullanımlık Davet Kodu Üretildi!</b>\n\n"
+            f" <b>Kod:</b> <code>{token}</code>\n\n"
             f"Bu kodu yetki vermek istediğiniz kişiye iletin. Kullanıcı bota bu kodu mesaj olarak attığı an erişim hakkı kalıcı olarak tanımlanacaktır."
         )
         
         keyboard = [
             [
-                InlineKeyboardButton("➕ Bir Tane Daha Üret", callback_data="admin:gen_token"),
-                InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")
+                InlineKeyboardButton(" Bir Tane Daha Üret", callback_data="admin:gen_token"),
+                InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")
             ]
         ]
         
@@ -653,21 +655,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin: List Unused Tokens
     elif query.data == "admin:list_tokens":
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
-            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            await query.answer("️ Yetkiniz yok!", show_alert=True)
             return
             
         tokens = db.get_unused_tokens()
         if not tokens:
-            list_display_text = "📜 <b>Kullanılmamış aktif davet kodu bulunmuyor.</b>\n\nYeni kod oluşturmak için 'Davet Kodu Üret' butonuna basın."
-            keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
+            list_display_text = " <b>Kullanılmamış aktif davet kodu bulunmuyor.</b>\n\nYeni kod oluşturmak için 'Davet Kodu Üret' butonuna basın."
+            keyboard = [[InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")]]
         else:
-            list_display_text = "📜 <b>Aktif Davet Kodları (Kullanılmamış):</b>\n\nSilmek/İptal etmek istediğiniz davet kodunun yanındaki [❌] butonuna tıklayın."
+            list_display_text = " <b>Aktif Davet Kodları (Kullanılmamış):</b>\n\nSilmek/İptal etmek istediğiniz davet kodunun yanındaki [] butonuna tıklayın."
             keyboard = []
             for t in tokens:
                 keyboard.append([
-                    InlineKeyboardButton(f"❌ {t['token']}", callback_data=f"admin:del_token:{t['token']}")
+                    InlineKeyboardButton(f" {t['token']}", callback_data=f"admin:del_token:{t['token']}")
                 ])
-            keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
+            keyboard.append([InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")])
             
         await query.message.edit_text(
             text=list_display_text,
@@ -678,7 +680,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin: Delete Unused Token
     elif query.data.startswith("admin:del_token:"):
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
-            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            await query.answer("️ Yetkiniz yok!", show_alert=True)
             return
             
         token_to_del = query.data.split(":")[-1]
@@ -688,16 +690,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         tokens = db.get_unused_tokens()
         if not tokens:
-            list_display_text = "📜 <b>Kullanılmamış aktif davet kodu bulunmuyor.</b>"
-            keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
+            list_display_text = " <b>Kullanılmamış aktif davet kodu bulunmuyor.</b>"
+            keyboard = [[InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")]]
         else:
-            list_display_text = "📜 <b>Aktif Davet Kodları (Kullanılmamış):</b>\n\nSilmek/İptal etmek istediğiniz davet kodunun yanındaki [❌] butonuna tıklayın."
+            list_display_text = " <b>Aktif Davet Kodları (Kullanılmamış):</b>\n\nSilmek/İptal etmek istediğiniz davet kodunun yanındaki [] butonuna tıklayın."
             keyboard = []
             for t in tokens:
                 keyboard.append([
-                    InlineKeyboardButton(f"❌ {t['token']}", callback_data=f"admin:del_token:{t['token']}")
+                    InlineKeyboardButton(f" {t['token']}", callback_data=f"admin:del_token:{t['token']}")
                 ])
-            keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
+            keyboard.append([InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")])
             
         await query.message.edit_text(
             text=list_display_text,
@@ -708,20 +710,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin: List Users
     elif query.data == "admin:list_users":
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
-            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            await query.answer("️ Yetkiniz yok!", show_alert=True)
             return
             
         users = db.get_authorized_users()
         filtered_users = [u for u in users if str(u['chat_id']) != config.ADMIN_CHAT_ID]
         
         if not filtered_users:
-            users_text = "👥 <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
-            keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
+            users_text = " <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
+            keyboard = [[InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")]]
         else:
             users_text = (
-                "👥 <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
+                " <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
                 "Aşağıdaki listede her kullanıcının Telegram ID'si ve eklediği kişilerin sayısı gösterilmektedir.\n\n"
-                "⚠️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
+                "️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
             )
             keyboard = []
             chat_ids = [u['chat_id'] for u in filtered_users]
@@ -731,9 +733,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 profiles = all_user_profiles.get(u['chat_id'], [])
                 profiles_str = f"({len(profiles)} Profil)" if profiles else "(Profil yok)"
                 keyboard.append([
-                    InlineKeyboardButton(f"❌ Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
+                    InlineKeyboardButton(f" Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
                 ])
-            keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
+            keyboard.append([InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")])
             
         await query.message.edit_text(
             text=users_text,
@@ -744,7 +746,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin: Perform User Revocation
     elif query.data.startswith("admin:revoke:"):
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
-            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            await query.answer("️ Yetkiniz yok!", show_alert=True)
             return
             
         user_to_revoke = query.data.split(":")[-1]
@@ -758,7 +760,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=user_to_revoke,
-                text="⚠️ <b>Erişim Yetkiniz İptal Edildi!</b>\n\nAdmin tarafından bu bota erişim yetkiniz kaldırılmıştır. Arka plandaki taramalarınız durdurulmuş ve tüm profilleriniz silinmiştir.",
+                text="️ <b>Erişim Yetkiniz İptal Edildi!</b>\n\nAdmin tarafından bu bota erişim yetkiniz kaldırılmıştır. Arka plandaki taramalarınız durdurulmuş ve tüm profilleriniz silinmiştir.",
                 parse_mode="HTML"
             )
         except Exception as e:
@@ -773,22 +775,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filtered_users = [u for u in users if str(u['chat_id']) != config.ADMIN_CHAT_ID]
         
         if not filtered_users:
-            users_text = "👥 <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
-            keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
+            users_text = " <b>Kayıtlı aktif kullanıcı bulunmamaktadır (Siz hariç).</b>"
+            keyboard = [[InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")]]
         else:
             users_text = (
-                "👥 <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
+                " <b>Yetkilendirilmiş Aktif Kullanıcılar:</b>\n\n"
                 "Aşağıdaki listede her kullanıcının Telegram ID'si ve eklediği kişilerin sayısı gösterilmektedir.\n\n"
-                "⚠️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
+                "️ <b>İptal (Revoke):</b> Bir kullanıcının yetkisini iptal ettiğinizde, o kullanıcının tüm profilleri, takip listeleri veritabanından kalıcı olarak silinir ve arka plandaki tüm tarama işleri sonlandırılır."
             )
             keyboard = []
             for u in filtered_users:
                 profiles = db.get_profiles(u['chat_id'])
                 profiles_str = f"({len(profiles)} Profil)" if profiles else "(Profil yok)"
                 keyboard.append([
-                    InlineKeyboardButton(f"❌ Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
+                    InlineKeyboardButton(f" Revoke ID: {u['chat_id']} {profiles_str}", callback_data=f"admin:revoke:{u['chat_id']}")
                 ])
-            keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
+            keyboard.append([InlineKeyboardButton(" Yetki Paneli", callback_data="menu:admin")])
             
         await query.message.edit_text(
             text=users_text,
@@ -864,19 +866,19 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
                     context.bot_data['sent_alerts'][alert_key] = now
                     
                     msg = (
-                        f"🚨 <b>ADÜ BOŞ RANDEVU BİLDİRİMİ!</b>\n\n"
-                        f"👤 <b>Hasta Profili:</b> {profile['name']} ({profile['tc_kimlik'][:3]}***)\n"
-                        f"🏥 <b>Ana Bölüm:</b> {active_name}\n"
-                        f"🩺 <b>Poliklinik:</b> {poly['name']}\n"
-                        f"📅 <b>Tarih:</b> {slot['date']}\n"
-                        f"⏰ <b>Saat:</b> <b>{slot['time']}</b>\n"
-                        f"👨‍⚕️ <b>Hekim:</b> {slot['doctor']}\n\n"
-                        f"⚡️ <i>Aşağıdaki butona tıklayarak profil bilgileriyle hastaneden randevuyu anında onaylayıp alabilirsiniz!</i>"
+                        f" <b>ADÜ BOŞ RANDEVU BİLDİRİMİ!</b>\n\n"
+                        f" <b>Hasta Profili:</b> {profile['name']} ({profile['tc_kimlik'][:3]}***)\n"
+                        f" <b>Ana Bölüm:</b> {active_name}\n"
+                        f" <b>Poliklinik:</b> {poly['name']}\n"
+                        f" <b>Tarih:</b> {slot['date']}\n"
+                        f" <b>Saat:</b> <b>{slot['time']}</b>\n"
+                        f"‍️ <b>Hekim:</b> {slot['doctor']}\n\n"
+                        f"️ <i>Aşağıdaki butona tıklayarak profil bilgileriyle hastaneden randevuyu anında onaylayıp alabilirsiniz!</i>"
                     )
                     
                     callback_data = f"book:{profile['id']}:{active_id}:{poly['id']}:{slot['slot_id']}"
                     keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("⚡️ Randevuyu Benim İçin Anında Al", callback_data=callback_data)]
+                        [InlineKeyboardButton("️ Randevuyu Benim İçin Anında Al", callback_data=callback_data)]
                     ])
                     
                     await context.bot.send_message(
