@@ -1,11 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-import urllib3
 import time
 import logging
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("adu_bot.scraper")
 
 BASE_URL = "https://randevu.adu.edu.tr"
@@ -13,7 +11,6 @@ BASE_URL = "https://randevu.adu.edu.tr"
 class ADUScraper:
     def __init__(self):
         self.session = requests.Session()
-        self.session.verify = False
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
