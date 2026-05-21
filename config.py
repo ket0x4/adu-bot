@@ -24,7 +24,7 @@ LOG_LEVEL = getattr(logging, LOG_LEVEL_STR, logging.INFO)
 log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # Log file path
-log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adu_bot.log")
+log_file = os.getenv("LOG_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "adu_bot.log"))
 
 # File Handler (5MB max size, keeping 3 backups, UTF-8 encoded)
 file_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")

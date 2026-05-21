@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - DB_PATH=/app/data/adu_bot.db
+      - LOG_PATH=/app/data/adu_bot.log
     volumes:
-      - ./adu_bot.db:/app/adu_bot.db
-      - ./adu_bot.log:/app/adu_bot.log
+      - ./data:/app/data
