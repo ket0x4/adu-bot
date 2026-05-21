@@ -109,127 +109,156 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Text Handler (Wizard & Invitation Code Resolver) ---
 
+async def _handle_unauthorized_user(update: Update, text: str) -> bool:
+    """Handles messages from unauthorized users, primarily checking for invitation tokens."""
+    chat_id = update.effective_chat.id
+    token_upper = text.upper()
+
+    if token_upper.startswith("ADU-") and db.validate_invitation_token(token_upper):
+        # Claim token atomically to prevent TOCTOU race conditions
+        if db.use_invitation_token(token_upper, chat_id):
+            db.set_user_authorized(chat_id, True)
+
+            success_auth = (
+                "🎉 <b>Davet Kodunuz Başarıyla Doğrulandı!</b>\n\n"
+                "Bot için tam erişim yetkiniz kalıcı olarak tanımlanmıştır.\n\n"
+                "Lütfen <b>/start</b> yazarak ana kontrol menüsüne gidin ve ilk profilinizi oluşturarak takibi başlatın!"
+            )
+            await update.message.reply_text(text=success_auth, parse_mode="HTML")
+        else:
+            await update.message.reply_text(
+                text="⚠️ <b>Bu davet kodu zaten kullanılmış!</b>\n\n"
+                     "Lütfen yeni bir davet kodu girmeyi deneyin:",
+                parse_mode="HTML"
+            )
+        return True
+    else:
+        await update.message.reply_text(
+            text="⚠️ <b>Yetkisiz Giriş veya Geçersiz Davet Kodu!</b>\n\n"
+                 "Lütfen size gönderilen davet kodunu doğru girdiğinizden emin olun (Örn: <code>ADU-XXXX-XXXX</code>):",
+            parse_mode="HTML"
+        )
+        return True
+
+async def _wizard_step_name(update: Update, wizard: dict, text: str):
+    """Handles the name entry step in the profile wizard."""
+    wizard['name'] = text
+    wizard['step'] = 'tc'
+    await update.message.reply_text(
+        text=f"👤 Profil: <b>{text}</b>\n\n"
+             f"Lütfen bu kişi için 11 haneli <b>T.C. Kimlik Numarasını</b> girin:",
+        parse_mode="HTML"
+    )
+
+async def _wizard_step_tc(update: Update, wizard: dict, text: str):
+    """Handles the TC number entry step in the profile wizard."""
+    if not text.isdigit() or len(text) != 11:
+        await update.message.reply_text(
+            text="⚠️ <b>Hatalı T.C. Kimlik Numarası!</b>\n"
+                 "Lütfen tam olarak 11 haneli bir sayı girin:",
+            parse_mode="HTML"
+        )
+        return
+
+    wizard['tc'] = text
+    wizard['step'] = 'birth'
+    await update.message.reply_text(
+        text=f"👤 Profil: <b>{wizard['name']}</b>\n"
+             f"🆔 T.C.: <code>{text[:3]}********</code>\n\n"
+             f"Lütfen doğum tarihini <b>GG.AA.YYYY</b> formatında girin (Örn: <code>15.08.1985</code>):",
+        parse_mode="HTML"
+    )
+
+async def _wizard_step_birth(update: Update, wizard: dict, text: str):
+    """Handles the birth date entry step in the profile wizard."""
+    if not re.match(r'^\d{2}\.\d{2}\.\d{4}$', text):
+        await update.message.reply_text(
+            text="⚠️ <b>Hatalı Doğum Tarihi Formatı!</b>\n"
+                 "Lütfen tarihi tam olarak GG.AA.YYYY formatında girin (Örn: <code>15.08.1985</code>):",
+            parse_mode="HTML"
+        )
+        return
+
+    wizard['birth'] = text
+    wizard['step'] = 'phone'
+    await update.message.reply_text(
+        text=f"👤 Profil: <b>{wizard['name']}</b>\n"
+             f"📅 Doğum Tarihi: <code>{text}</code>\n\n"
+             f"Lütfen <b>telefon numarasını</b> 11 haneli ve 0 ile başlayacak şekilde girin (Örn: <code>05051234567</code>):",
+        parse_mode="HTML"
+    )
+
+async def _wizard_step_phone(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, wizard: dict, text: str):
+    """Handles the phone number entry step and completes the profile wizard."""
+    if not text.isdigit() or len(text) != 11 or not text.startswith("0"):
+        await update.message.reply_text(
+            text="⚠️ <b>Hatalı Telefon Numarası!</b>\n"
+                 "Telefon numarası `05` ile başlayan 11 haneli bir sayı olmalıdır (Örn: <code>05051234567</code>):",
+            parse_mode="HTML"
+        )
+        return
+
+    # All steps completed! Save profile!
+    db.add_profile(
+        chat_id=chat_id,
+        name=wizard['name'],
+        tc_kimlik=wizard['tc'],
+        dogum_tarihi=wizard['birth'],
+        telefon=text
+    )
+
+    profile_name = wizard['name']
+    context.user_data.pop('adding_profile', None)
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("👤 Profillerime Git", callback_data="menu:profiles")
+    ]])
+
+    await update.message.reply_text(
+        text=f"✅ <b>Profil Başarıyla Oluşturuldu!</b>\n\n"
+             f"👤 <b>İsim/Etiket:</b> {profile_name}\n"
+             f"🆔 <b>T.C. Kimlik:</b> <code>{wizard['tc'][:3]}********</code>\n"
+             f"📅 <b>Doğum Tarihi:</b> {wizard['birth']}\n"
+             f"📞 <b>Telefon:</b> {text}\n\n"
+             f"Artık bu profil için takip listesi oluşturabilirsiniz.",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+async def _handle_profile_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> bool:
+    """Manages the step-by-step wizard for creating a new patient profile."""
+    if 'adding_profile' not in context.user_data:
+        return False
+
+    wizard = context.user_data['adding_profile']
+    step = wizard.get('step')
+
+    if step == 'name':
+        await _wizard_step_name(update, wizard, text)
+    elif step == 'tc':
+        await _wizard_step_tc(update, wizard, text)
+    elif step == 'birth':
+        await _wizard_step_birth(update, wizard, text)
+    elif step == 'phone':
+        await _wizard_step_phone(update, context, chat_id, wizard, text)
+    else:
+        return False
+
+    return True
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
     # 1. Intercept unauthorized users & check for dynamic token entry
     if not check_auth(chat_id):
-        token_upper = text.upper()
-        if token_upper.startswith("ADU-") and db.validate_invitation_token(token_upper):
-            # Claim token atomically to prevent TOCTOU race conditions
-            if db.use_invitation_token(token_upper, chat_id):
-                db.set_user_authorized(chat_id, True)
-                
-                success_auth = (
-                    "🎉 <b>Davet Kodunuz Başarıyla Doğrulandı!</b>\n\n"
-                    "Bot için tam erişim yetkiniz kalıcı olarak tanımlanmıştır.\n\n"
-                    "Lütfen <b>/start</b> yazarak ana kontrol menüsüne gidin ve ilk profilinizi oluşturarak takibi başlatın!"
-                )
-                await update.message.reply_text(text=success_auth, parse_mode="HTML")
-            else:
-                await update.message.reply_text(
-                    text="⚠️ <b>Bu davet kodu zaten kullanılmış!</b>\n\n"
-                         "Lütfen yeni bir davet kodu girmeyi deneyin:",
-                    parse_mode="HTML"
-                )
-            return
-        else:
-            await update.message.reply_text(
-                text="⚠️ <b>Yetkisiz Giriş veya Geçersiz Davet Kodu!</b>\n\n"
-                     "Lütfen size gönderilen davet kodunu doğru girdiğinizden emin olun (Örn: <code>ADU-XXXX-XXXX</code>):",
-                parse_mode="HTML"
-            )
+        if await _handle_unauthorized_user(update, text):
             return
 
     # If the user is authorized and in the middle of adding a profile
-    if 'adding_profile' in context.user_data:
-        wizard = context.user_data['adding_profile']
-        step = wizard.get('step')
-        
-        if step == 'name':
-            wizard['name'] = text
-            wizard['step'] = 'tc'
-            await update.message.reply_text(
-                text=f"👤 Profil: <b>{text}</b>\n\n"
-                     f"Lütfen bu kişi için 11 haneli <b>T.C. Kimlik Numarasını</b> girin:",
-                parse_mode="HTML"
-            )
-            return
-            
-        elif step == 'tc':
-            if not text.isdigit() or len(text) != 11:
-                await update.message.reply_text(
-                    text="⚠️ <b>Hatalı T.C. Kimlik Numarası!</b>\n"
-                         "Lütfen tam olarak 11 haneli bir sayı girin:",
-                    parse_mode="HTML"
-                )
-                return
-            wizard['tc'] = text
-            wizard['step'] = 'birth'
-            await update.message.reply_text(
-                text=f"👤 Profil: <b>{wizard['name']}</b>\n"
-                     f"🆔 T.C.: <code>{text[:3]}********</code>\n\n"
-                     f"Lütfen doğum tarihini <b>GG.AA.YYYY</b> formatında girin (Örn: <code>15.08.1985</code>):",
-                parse_mode="HTML"
-            )
-            return
-            
-        elif step == 'birth':
-            if not re.match(r'^\d{2}\.\d{2}\.\d{4}$', text):
-                await update.message.reply_text(
-                    text="⚠️ <b>Hatalı Doğum Tarihi Formatı!</b>\n"
-                         "Lütfen tarihi tam olarak GG.AA.YYYY formatında girin (Örn: <code>15.08.1985</code>):",
-                    parse_mode="HTML"
-                )
-                return
-            wizard['birth'] = text
-            wizard['step'] = 'phone'
-            await update.message.reply_text(
-                text=f"👤 Profil: <b>{wizard['name']}</b>\n"
-                     f"📅 Doğum Tarihi: <code>{text}</code>\n\n"
-                     f"Lütfen <b>telefon numarasını</b> 11 haneli ve 0 ile başlayacak şekilde girin (Örn: <code>05051234567</code>):",
-                parse_mode="HTML"
-            )
-            return
-            
-        elif step == 'phone':
-            if not text.isdigit() or len(text) != 11 or not text.startswith("0"):
-                await update.message.reply_text(
-                    text="⚠️ <b>Hatalı Telefon Numarası!</b>\n"
-                         "Telefon numarası `05` ile başlayan 11 haneli bir sayı olmalıdır (Örn: <code>05051234567</code>):",
-                    parse_mode="HTML"
-                )
-                return
-            
-            # All steps completed! Save profile!
-            db.add_profile(
-                chat_id=chat_id,
-                name=wizard['name'],
-                tc_kimlik=wizard['tc'],
-                dogum_tarihi=wizard['birth'],
-                telefon=text
-            )
-            
-            profile_name = wizard['name']
-            context.user_data.pop('adding_profile', None)
-            
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("👤 Profillerime Git", callback_data="menu:profiles")
-            ]])
-            
-            await update.message.reply_text(
-                text=f"✅ <b>Profil Başarıyla Oluşturuldu!</b>\n\n"
-                     f"👤 <b>İsim/Etiket:</b> {profile_name}\n"
-                     f"🆔 <b>T.C. Kimlik:</b> <code>{wizard['tc'][:3]}******</code>\n"
-                     f"📅 <b>Doğum Tarihi:</b> {wizard['birth']}\n"
-                     f"📞 <b>Telefon:</b> {text}\n\n"
-                     f"Artık bu profil için takip listesi oluşturabilirsiniz.",
-                parse_mode="HTML",
-                reply_markup=keyboard
-            )
-            return
-            
+    if await _handle_profile_wizard(update, context, chat_id, text):
+        return
+
     # Default text response if not in wizard
     await update.message.reply_text(
         text="⚠️ Anlaşılmadı. Menüyü açmak için lütfen /start yazın."
