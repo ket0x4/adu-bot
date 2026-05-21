@@ -1,95 +1,88 @@
-# ADU Hastane Randevu Takip ve Otomatik Rezervasyon Botu
+# ADÜ Hastane Randevu Takip ve Otomatik Rezervasyon Botu
 
-Bu proje, Aydin Adnan Menderes Universitesi (ADU) online randevu sisteminde bos slot bulundugunda kullanicilari Telegram uzerinden aninda bilgilendiren ve tek tikla rezervasyon yapilmasini saglayan ozel bir Telegram botudur.
+Bu proje, Aydın Adnan Menderes Üniversitesi (ADÜ) online randevu sisteminde boş slot bulunduğunda kullanıcıları Telegram üzerinden anında bilgilendiren ve tek tıkla rezervasyon yapılmasını sağlayan bir Telegram botudur.
 
-## Ozellikler
+## Özellikler
 
-* Coklu Profil Yonetimi: Kendiniz veya yakinlariniz icin ayri T.C. Kimlik No, dogum tarihi ve telefon bilgileri barindiran profiller tanimlayabilirsiniz.
-* Dinamik Bolum Takibi: Tanimladiginiz her profil icin ayri uzmanlik alanlarini (Kardiyoloji, Goz Hastaliklari vb.) takip listesine alabilirsiniz.
-* Arka Plan Sorgulama: Belirlenen zaman araliklarinda (varsayilan 15 dakika) hastane sistemini otomatik olarak sorgular.
-* Tek Tusla Rezervasyon: Bos randevu slotu bulundugunda gelen Telegram mesajindaki butona tiklayarak aninda randevu kaydi gerceklestirebilirsiniz.
-* Master Admin Modeli: Bot sadece Master Admin tarafindan uretilen tek kullanimlik davet kodlarina sahip yetkili kullanicilar tarafindan kullanilabilir.
-* Guvenli Yetki Yonetimi: Master Admin panelinden aktif kullanicilarin yetkileri aninda iptal edilebilir (revoke). Yetkisi iptal edilen kullanicinin verileri veritabanindan kalici olarak temizlenir.
+* Çoklu Profil Yönetimi: Kendiniz veya yakınlarınız için ayrı T.C. Kimlik No, doğum tarihi ve telefon bilgileri barındıran profiller tanımlayabilirsiniz.
+* Dinamik Bölüm Takibi: Tanımladığınız her profil için ayrı uzmanlık alanlarını (Kardiyoloji, Göz Hastalıkları vb.) takip listesine alabilirsiniz.
+* Arka Plan Sorgulama: Belirlenen zaman aralıklarında (varsayılan 15 dakika) hastane sistemini otomatik olarak sorgular.
+* Tek Tuşla Rezervasyon: Boş randevu slotu bulunduğunda gelen Telegram mesajındaki butona tıklayarak anında randevu kaydı gerçekleştirebilirsiniz.
+* Master Admin Modeli: Bot sadece Master Admin tarafından üretilen tek kullanımlık davet kodlarına sahip yetkili kullanıcılar tarafından kullanılabilir.
+* Güvenli Yetki Yönetimi: Master Admin panelinden aktif kullanıcıların yetkileri anında iptal edilebilir (revoke). Yetkisi iptal edilen kullanıcının verileri veritabanından kalıcı olarak temizlenir.
 
-## Guvenlik ve Mimari
+## Güvenlik ve Mimari
 
-* SQL Injection Korumasi: Veritabanindaki tum islemlerde SQLite parametreli sorgulari kullanilarak SQL Injection riskleri tamamen engellenmistir.
-* TOCTOU Engelleme: Davet kodlarinin ayni anda birden fazla kisi tarafindan kullanilmasini (race condition) onlemek amaciyla SQLite uzerinde atomik guncelleme mantigi uygulanmistir.
-* Kriptografik Rastgelelik: Davet kodlari Python `secrets` modulu ile kriptografik olarak guvenli sekilde uretilir.
-* Yetki Denetimi: Tum callback ve komut tetikleyicilerinde Master Admin ve normal kullanici yetkileri her adimda bagimsiz olarak dogrulanir.
+* SQL Injection Koruması: Veritabanındaki tüm işlemlerde SQLite parametreli sorguları kullanılarak SQL Injection riskleri tamamen engellenmiştir.
+* TOCTOU Engelleme: Davet kodlarının aynı anda birden fazla kişi tarafından kullanılmasını (race condition) önlemek amacıyla SQLite üzerinde atomik güncelleme mantığı uygulanmıştır.
+* Kriptografik Rastgelelik: Davet kodları Python `secrets` modülü ile kriptografik olarak güvenli şekilde üretilir.
+* Yetki Denetimi: Tüm callback ve komut tetikleyicilerinde Master Admin ve normal kullanıcı yetkileri her adımda bağımsız olarak doğrulanır.
 
 ## Gereksinimler
 
-Projenin yerelinizde veya sunucuda calismasi icin asagidaki bilesenlerin yuklu olmasi gerekir:
+Projenin yerelinizde veya sunucuda çalışması için aşağıdaki bileşenlerin yüklü olması gerekir:
 
 * Python >= 3.9
-* uv (Modern ve hizli paket yoneticisi) veya pip
-* Docker ve Docker Compose (Opsiyonel - Sunucu kurulumu icin)
+* uv veya pip
+* Docker ve Docker Compose (opsiyonel)
 
-## Yerel Kurulum ve Calistirma
+## Yerel Kurulum ve Çalıştırma
 
-Projede paket yonetimi icin Astral tarafindan gelistirilen `uv` kullanilmaktadir.
-
-### 1. Depoyu Klonlayin ve Proje Dizinine Gidin
+### 1. Depoyu Klonlayın ve Proje Dizinine Gidin
 
 ```bash
 git clone <depo-adresi>
 cd adu
 ```
 
-### 2. Cevre Degiskenlerini Yapilandirin
+### 2. Çevre Değişkenlerini Yapılandırın
 
-`.env.example` dosyasini `.env` olarak kopyalayin ve gerekli alanlari doldurun:
+`.env.example` dosyasını `.env` olarak kopyalayın ve gerekli alanları doldurun:
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` dosyasindaki degiskenler:
+`.env` dosyasındaki değişkenler:
 
-* `TELEGRAM_BOT_TOKEN`: Telegram BotFather'dan aldiginiz bot belirteci.
-* `ADMIN_CHAT_ID`: Master Admin olarak tanimlanacak kullanicinin Telegram chat ID'si.
-* `LOG_LEVEL`: Uygulamanin log seviyesi (DEBUG, INFO, WARNING, ERROR).
+* `TELEGRAM_BOT_TOKEN`: Telegram BotFather'dan aldığınız bot belirteci.
+* `ADMIN_CHAT_ID`: Master Admin olarak tanımlanacak kullanıcının Telegram chat ID'si.
+* `LOG_LEVEL`: Uygulamanın log seviyesi (DEBUG, INFO, WARNING, ERROR).
 
-### 3. Sanal Ortam Olusturun ve Bagimliliklari Yukleyin
+### 3. Sanal Ortam Oluşturun ve Bağımlılıkları Yükleyin
 
-`uv` kullanarak sanal ortami saniyeler icinde olusturup bagimliliklari senkronize edebilirsiniz:
+`uv` kullanarak sanal ortamı saniyeler içinde oluşturup bağımlılıkları senkronize edebilirsiniz:
 
 ```bash
 uv venv
 uv sync
 ```
 
-### 4. Botu Calistirin
+### 4. Botu Çalıştırın
 
 ```bash
 uv run bot.py
 ```
 
-## Docker ile Kurulum (Sunucu Yonetimi)
+## Docker ile Kurulum
 
-Proje, sunucularda kolayca calistirilabilmesi icin Dockerfile ve Docker Compose destegiyle birlikte gelir. Docker imaj derleme asamasinda `uv` kullanilarak derleme sureleri optimize edilmistir.
-
-### 1. Docker Compose ile Baslatin
+### 1. Docker Compose ile Başlatın
 
 ```bash
 docker compose up -d --build
 ```
 
-Bu komut botu arka planda baslatir, veritabanini (`adu_bot.db`) ve log dosyalarini (`adu_bot.log`) ana makinede kalici (persistent) hale getirir.
-
-### 2. Loglari Takip Edin
+### 2. Logları Takip Edin
 
 ```bash
 docker compose logs -f
 ```
 
-## Proje Yapisi
+## Proje Yapısı
 
-* `bot.py`: Bot uygulamasinin giris noktasi, Telegram Application kurulumu ve sinyal yoneticileri.
-* `handlers.py`: Komutlar, mesaj yoneticileri, sihirbazlar, callback islemleri ve arka plan tarama gorevleri.
-* `db.py`: Veritabani semasi, SQLite baglanti yonetimi, CRUD islemleri ve atomik davet kodu Claim mantigi.
-* `scraper.py`: Hastane randevu portalindan veri cekme (scraping) ve rezervasyon yapma modulu.
-* `keyboards.py`: Dinamik Telegram butonlari ve arayuz bilesenleri.
-* `config.py`: Loglama altyapisi, cevre degiskenleri ve sistem sabitleri.
-* `pyproject.toml` ve `uv.lock`: Proje bagimliliklari ve kilitli paket surumleri (`uv` uyumlu).
+* `bot.py`: Bot uygulamasının giriş noktası, Telegram Application kurulumu ve sinyal yöneticileri.
+* `handlers.py`: Komutlar, mesaj yöneticileri, sihirbazlar, callback işlemleri ve arka plan tarama görevleri.
+* `db.py`: Veritabanı şeması, SQLite bağlantı yönetimi, CRUD işlemleri ve atomik davet kodu Claim mantığı.
+* `scraper.py`: Hastane randevu portalından veri çekme (scraping) ve rezervasyon yapma modülü.
+* `keyboards.py`: Dinamik Telegram butonları ve arayüz bileşenleri.
+* `config.py`: Loglama altyapısı, çevre değişkenleri ve sistem sabitleri.
