@@ -610,7 +610,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         scraper = ADUScraper()
         
         # Trigger the reservation!
-        success, message = scraper.book_appointment(
+        success, message = await asyncio.to_thread(
+            scraper.book_appointment,
             specialty_id=spec_id,
             polyclinic_id=poly_id,
             slot_id=slot_id,
@@ -823,7 +824,7 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
     
     # 1. Fetch live specialties from site
     scraper = ADUScraper()
-    active_specs = scraper.get_specialties()
+    active_specs = await asyncio.to_thread(scraper.get_specialties)
     if not active_specs:
         config.logger.info("No active specialties found on randevu.adu.edu.tr (everything is fully booked).")
         return
@@ -845,14 +846,14 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
             
             # 3. Fetch polyclinics
             await asyncio.sleep(1.5)
-            polyclinics = scraper.get_polyclinics(active_id)
+            polyclinics = await asyncio.to_thread(scraper.get_polyclinics, active_id)
             if not polyclinics:
                 continue
                 
             # 4. Check slots
             for poly in polyclinics:
                 await asyncio.sleep(1.5)
-                slots = scraper.check_slots(active_id, poly['id'])
+                slots = await asyncio.to_thread(scraper.check_slots, active_id, poly['id'])
                 if not slots:
                     continue
                     

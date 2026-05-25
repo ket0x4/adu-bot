@@ -182,7 +182,6 @@ class ADUScraper:
             # Fetch Step 4 page
             logger.info("Fetching /4")
             r4 = self.session.get(f"{BASE_URL}/4", headers=self.headers, timeout=15)
-            soup4 = BeautifulSoup(r4.text, 'html.parser')
             req_token = self._get_request_verification_token(r4.text)
             if not req_token:
                 logger.error("__RequestVerificationToken not found on /4")
@@ -328,7 +327,6 @@ class ADUScraper:
             # Step 5: Fetch confirmation page
             logger.info("Fetching /5 confirmation page")
             r5 = self.session.get(f"{BASE_URL}/5", headers=self.headers, timeout=15)
-            soup5 = BeautifulSoup(r5.text, 'html.parser')
             token5 = self._get_forgery_token(r5.text)
             
             # Submit personal details!
