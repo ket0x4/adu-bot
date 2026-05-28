@@ -7,6 +7,12 @@ logger = logging.getLogger("adu_bot.scraper")
 
 BASE_URL = "https://randevu.adu.edu.tr"
 
+# Pre-compiled regex patterns for performance
+RE_STEP02 = re.compile(r'Step02Operation\((\d+)\)')
+RE_STEP03 = re.compile(r'Step03Operation\((\d+)\)')
+RE_STEP04 = re.compile(r'Step04Operation\((\d+)\)')
+RE_TIME = re.compile(r'(\d{2}:\d{2})')
+
 class ADUScraper:
     def __init__(self):
         self.session = requests.Session()
@@ -69,7 +75,7 @@ class ADUScraper:
             # Parse specialties from buttons with onclick="Step02Operation(id)"
             buttons = soup2.find_all('button', onclick=True)
             for btn in buttons:
-                match = re.search(r'Step02Operation\((\d+)\)', btn.get('onclick', ''))
+                match = RE_STEP02.search(btn.get('onclick', ''))
                 if match:
                     spec_id = int(match.group(1))
                     spec_name = btn.get_text().strip()
@@ -126,7 +132,7 @@ class ADUScraper:
             # Parse polyclinics from Step03Operation(id) in buttons inside table
             buttons = soup3.find_all('button', onclick=True)
             for btn in buttons:
-                match = re.search(r'Step03Operation\((\d+)\)', btn.get('onclick', ''))
+                match = RE_STEP03.search(btn.get('onclick', ''))
                 if match:
                     poly_id = int(match.group(1))
                     poly_name = btn.find_parent('tr').find('td').get_text().strip() if btn.find_parent('tr') else "Poliklinik"
@@ -239,13 +245,13 @@ class ADUScraper:
                     # Find all buttons that call Step04Operation(id)
                     buttons = cell.find_all('button', onclick=True)
                     for btn in buttons:
-                        match = re.search(r'Step04Operation\((\d+)\)', btn.get('onclick', ''))
+                        match = RE_STEP04.search(btn.get('onclick', ''))
                         if match:
                             slot_id = int(match.group(1))
                             btn_text = btn.get_text().strip() # E.g., "09:00 BOŞ" or "09:00 \n BOŞ"
                             
                             # Extract time
-                            time_match = re.search(r'(\d{2}:\d{2})', btn_text)
+                            time_match = RE_TIME.search(btn_text)
                             slot_time = time_match.group(1) if time_match else "00:00"
                             
                             # Extract doctor/details from parent elements if visible
