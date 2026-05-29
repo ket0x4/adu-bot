@@ -7,7 +7,6 @@ logger = logging.getLogger("adu_bot.scraper")
 
 BASE_URL = "https://randevu.adu.edu.tr"
 
-# Pre-compile regex patterns for performance
 RE_STEP02 = re.compile(r'Step02Operation\((\d+)\)')
 RE_STEP03 = re.compile(r'Step03Operation\((\d+)\)')
 RE_STEP04 = re.compile(r'Step04Operation\((\d+)\)')
