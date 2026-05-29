@@ -10,11 +10,13 @@ import config
 import keyboards
 from scraper import ADUScraper
 
+CLEAN_RE = re.compile(r'[^a-z0-9]')
+
 def clean_turkish(s):
     """Cleans a string for safe, character-invariant matching"""
     s = s.lower()
     s = s.replace('ı', 'i').replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ö', 'o').replace('ç', 'c')
-    s = re.sub(r'[^a-z0-9]', '', s)
+    s = CLEAN_RE.sub('', s)
     return s
 
 def find_matching_specialty(tracked_name, active_specialties):
