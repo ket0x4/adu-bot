@@ -831,6 +831,11 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
         
     # 2. Iterate through each profile
     all_tracked_specs = db.get_profiles_specialties([p['id'] for p in profiles])
+
+    # Simple cache to avoid redundant scraper calls for the same departments/polyclinics
+    polyclinic_cache = {} # active_id -> polyclinics
+    slots_cache = {}      # (active_id, poly_id) -> slots
+
     for profile in profiles:
         tracked_specs = all_tracked_specs.get(profile['id'], [])
         if not tracked_specs:
@@ -845,15 +850,22 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
             config.logger.info(f"Tracked department '{tracked['specialty_name']}' is ACTIVE on site as '{active_name}' (ID: {active_id}).")
             
             # 3. Fetch polyclinics
-            await asyncio.sleep(1.5)
-            polyclinics = await asyncio.to_thread(scraper.get_polyclinics, active_id)
+            if active_id not in polyclinic_cache:
+                await asyncio.sleep(1.5)
+                polyclinic_cache[active_id] = await asyncio.to_thread(scraper.get_polyclinics, active_id)
+
+            polyclinics = polyclinic_cache[active_id]
             if not polyclinics:
                 continue
                 
             # 4. Check slots
             for poly in polyclinics:
-                await asyncio.sleep(1.5)
-                slots = await asyncio.to_thread(scraper.check_slots, active_id, poly['id'])
+                cache_key = (active_id, poly['id'])
+                if cache_key not in slots_cache:
+                    await asyncio.sleep(1.5)
+                    slots_cache[cache_key] = await asyncio.to_thread(scraper.check_slots, active_id, poly['id'])
+
+                slots = slots_cache[cache_key]
                 if not slots:
                     continue
                     
