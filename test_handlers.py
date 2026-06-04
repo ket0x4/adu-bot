@@ -84,5 +84,24 @@ class TestCheckAuth(unittest.TestCase):
         self.assertTrue(result)
         mock_db.get_user.assert_called_once_with("67890")
 
+class TestMakeToken(unittest.TestCase):
+
+    def test_make_token_format(self):
+        """Verify the token follows the ADU-XXXX-XXXX format and uses uppercase/digits."""
+        token = handlers.make_token()
+        # Matches ADU- followed by 4 chars, a hyphen, and another 4 chars.
+        # Chars should be uppercase letters or digits.
+        self.assertRegex(token, r'^ADU-[A-Z0-9]{4}-[A-Z0-9]{4}$')
+
+    def test_make_token_randomness(self):
+        """Verify that multiple calls produce different tokens (basic randomness check)."""
+        tokens = set()
+        for _ in range(50):
+            tokens.add(handlers.make_token())
+
+        # With 8 random characters (each ~36 options), the chance of collision
+        # in 50 tries is extremely low.
+        self.assertEqual(len(tokens), 50)
+
 if __name__ == '__main__':
     unittest.main()
