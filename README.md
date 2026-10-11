@@ -69,11 +69,11 @@ python -m unittest test_handlers.py
 ## Proje Yapısı
 
 * `bot.py`: Uygulama giriş noktası, Telegram bot konfigürasyonu ve merkezi arka plan tarayıcısı kurulumu.
-* `handlers.py`: Komutlar, mesaj sihirbazları, callback yönetimi, Sniper modu ve merkezi tarama döngüsü.
+* `handlers/`: Modüler bot işleyicileri paketi (komutlar, mesaj sihirbazları, bildirimler, alan bazlı callback yönlendiricisi ve merkezi tarama döngüsü).
 * `scraper.py`: `httpx` tabanlı tam asenkron hastane randevu portali sorgulama ve rezervasyon modülü.
 * `crypto.py`: Kişisel veriler için authenticated keystream at-rest şifreleme modülü.
 * `calendar_util.py`: iCalendar (`.ics`) dosyası ve Google Calendar URL oluşturucu.
 * `db.py`: WAL modunda SQLite veritabanı, CRUD işlemleri, şifreleme katmanı ve sistem metrikleri.
 * `keyboards.py`: Dinamik Telegram butonları, filtreleme ve sayfalama bileşenleri.
 * `config.py`: Loglama altyapısı, hastane departman listesi ve sabitler.
-* `test_handlers.py`: 30+ birim testten oluşan otomatik test paketi.
+* `test_handlers.py`: 40 birim testten oluşan kapsamlı otomatik test paketi.

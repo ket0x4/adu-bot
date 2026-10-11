@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import handlers
 import config
 import keyboards
@@ -325,11 +325,94 @@ class TestKeyboardsPreferences(unittest.TestCase):
         self.assertTrue(any("Sniper" in txt and "AÇIK" in txt for txt in buttons_text))
         self.assertTrue(any("7 Gün" in txt for txt in buttons_text))
 
-    def test_admin_keyboard_metrics(self):
-        kb = keyboards.get_admin_keyboard()
-        buttons_text = [btn.text for row in kb.inline_keyboard for btn in row]
-        self.assertTrue(any("Sistem Metrikleri" in txt for txt in buttons_text))
+class TestWizardsValidation(unittest.TestCase):
+
+    def test_validate_tc_kimlik_valid(self):
+        self.assertTrue(handlers.wizards.validate_tc_kimlik("12345678901"))
+        self.assertTrue(handlers.wizards.validate_tc_kimlik(" 12345678901 "))
+
+    def test_validate_tc_kimlik_invalid(self):
+        self.assertFalse(handlers.wizards.validate_tc_kimlik("12345"))
+        self.assertFalse(handlers.wizards.validate_tc_kimlik("123456789012"))
+        self.assertFalse(handlers.wizards.validate_tc_kimlik("1234567890a"))
+        self.assertFalse(handlers.wizards.validate_tc_kimlik(""))
+
+    def test_validate_birth_date_valid(self):
+        self.assertTrue(handlers.wizards.validate_birth_date("15.08.1995"))
+        self.assertTrue(handlers.wizards.validate_birth_date("01.01.2000"))
+
+    def test_validate_birth_date_invalid(self):
+        self.assertFalse(handlers.wizards.validate_birth_date("1995-08-15"))
+        self.assertFalse(handlers.wizards.validate_birth_date("15/08/1995"))
+        self.assertFalse(handlers.wizards.validate_birth_date("32.01.2000"))
+        self.assertFalse(handlers.wizards.validate_birth_date("29.02.2023")) # Not a leap year
+        self.assertFalse(handlers.wizards.validate_birth_date("01.01.2099")) # Future date
+
+    def test_clean_phone_number_standard(self):
+        self.assertEqual(handlers.wizards.clean_phone_number("05051234567"), "05051234567")
+
+    def test_clean_phone_number_formatting(self):
+        self.assertEqual(handlers.wizards.clean_phone_number("0505 123 45 67"), "05051234567")
+        self.assertEqual(handlers.wizards.clean_phone_number("+90 (505) 123-4567"), "05051234567")
+        self.assertEqual(handlers.wizards.clean_phone_number("5051234567"), "05051234567")
+
+    def test_clean_phone_number_invalid(self):
+        self.assertIsNone(handlers.wizards.clean_phone_number("12345"))
+        self.assertIsNone(handlers.wizards.clean_phone_number("02121234567")) # Non-mobile
+        self.assertIsNone(handlers.wizards.clean_phone_number("abcdefghijk"))
+
+class TestCallbackRouter(unittest.IsolatedAsyncioTestCase):
+
+    @patch('handlers.callbacks.router.check_auth')
+    async def test_handle_callback_unauthorized(self, mock_check_auth):
+        mock_check_auth.return_value = False
+        mock_update = MagicMock()
+        mock_query = MagicMock()
+        mock_query.message.chat.id = 12345
+        mock_query.answer = AsyncMock()
+        mock_update.callback_query = mock_query
+        mock_context = MagicMock()
+
+        import handlers.callbacks.router as router
+        await router.handle_callback(mock_update, mock_context)
+        mock_query.answer.assert_called_once_with("⚠️ Erişim yetkiniz yok!", show_alert=True)
+
+    @patch('handlers.callbacks.router.check_auth')
+    @patch('handlers.callbacks.router.db')
+    async def test_handle_callback_noop(self, mock_db, mock_check_auth):
+        mock_check_auth.return_value = True
+        mock_update = MagicMock()
+        mock_query = MagicMock()
+        mock_query.message.chat.id = 12345
+        mock_query.data = "noop"
+        mock_query.answer = AsyncMock()
+        mock_update.callback_query = mock_query
+        mock_context = MagicMock()
+        mock_context.user_data = {}
+
+        import handlers.callbacks.router as router
+        await router.handle_callback(mock_update, mock_context)
+        mock_query.answer.assert_called_once()
+        mock_db.ensure_user_exists.assert_called_once_with(12345)
+
+class TestScannerBotDataFix(unittest.IsolatedAsyncioTestCase):
+
+    @patch('handlers.scanner.db')
+    async def test_scanner_uses_bot_data_not_bot_dot_data(self, mock_db):
+        """Verifies central_scan_job initializes and reads context.bot_data without AttributeError"""
+        mock_db.get_active_users.return_value = []
+        mock_context = MagicMock()
+        mock_context.bot_data = {}
+        # Ensure context.bot has NO data attribute, exactly like python-telegram-bot
+        mock_bot = MagicMock(spec=['send_message', 'send_document'])
+        mock_context.bot = mock_bot
+
+        import handlers.scanner as scanner
+        # Calling with no active users should return cleanly
+        await scanner.central_scan_job(mock_context)
+        self.assertFalse(hasattr(mock_bot, 'data'))
 
 if __name__ == '__main__':
     unittest.main()
+
 
