@@ -10,28 +10,20 @@ import db
 import config
 import handlers
 
-# --- Post Initialization Function (Reload Jobs) ---
+# --- Post Initialization Function (Central Scanner Setup) ---
 
 async def post_init(application):
-    config.logger.info("Initializing bot database scan jobs reload...")
+    config.logger.info("Initializing central hospital scan engine...")
     active_users = db.get_active_users()
-    for user in active_users:
-        try:
-            chat_id = int(str(user['chat_id']).strip())
-            interval = int(user['scan_interval'])
-            
-            application.job_queue.run_repeating(
-                callback=handlers.scan_job,
-                interval=interval * 60,
-                first=10,
-                chat_id=chat_id,
-                name=str(chat_id)
-            )
-            config.logger.info(f"Job re-established for user {chat_id} with {interval} min interval.")
-        except Exception as e:
-            config.logger.error(f"Error restoring job for user {user.get('chat_id')}: {e}")
-            
-    config.logger.info(f"Database jobs reload complete. Total active jobs restored: {len(active_users)}")
+    
+    # Establish single centralized background scanner
+    application.job_queue.run_repeating(
+        callback=handlers.central_scan_job,
+        interval=30,  # Checks every 30 seconds for due users
+        first=5,
+        name="central_hospital_scanner"
+    )
+    config.logger.info(f"Central scanner active. Initialized for {len(active_users)} active users.")
 
 # --- Main Run ---
 
@@ -45,9 +37,13 @@ def main():
     
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(post_init).build()
     
-    # Handlers
+    # Command Handlers
     app.add_handler(CommandHandler("start", handlers.start))
     app.add_handler(CommandHandler(["help", "yardim"], handlers.help_command))
+    app.add_handler(CommandHandler("stats", handlers.stats_command))
+    app.add_handler(CommandHandler("ping", handlers.ping_command))
+    
+    # Interaction Handlers
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     

@@ -12,6 +12,8 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 if ADMIN_CHAT_ID:
     ADMIN_CHAT_ID = str(ADMIN_CHAT_ID).strip()
 
+PROXY_URL = os.getenv("PROXY_URL", "").strip() or None
+
 # Setup logging
 LOG_LEVEL_STR = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_LEVEL = getattr(logging, LOG_LEVEL_STR, logging.INFO)

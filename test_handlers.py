@@ -228,5 +228,108 @@ class TestSlotAlertView(unittest.TestCase):
         self.assertIn("Randevu bulunamadı", text)
         self.assertEqual(len(markup.inline_keyboard), 0)
 
+class TestCryptoModule(unittest.TestCase):
+
+    def test_encrypt_decrypt_roundtrip(self):
+        import crypto
+        sample = "12345678901"
+        enc = crypto.encrypt_text(sample)
+        self.assertTrue(enc.startswith("enc:v1:"))
+        self.assertNotEqual(enc, sample)
+        dec = crypto.decrypt_text(enc)
+        self.assertEqual(dec, sample)
+
+    def test_decrypt_plaintext_fallback(self):
+        import crypto
+        plain = "05051234567"
+        self.assertEqual(crypto.decrypt_text(plain), plain)
+
+    def test_empty_string_handling(self):
+        import crypto
+        self.assertEqual(crypto.encrypt_text(""), "")
+        self.assertEqual(crypto.decrypt_text(""), "")
+
+class TestSlotFiltering(unittest.TestCase):
+
+    def setUp(self):
+        self.slots = [
+            {'date': '15.10.2026', 'time': '09:30'},
+            {'date': '15.10.2026', 'time': '14:30'},
+            {'date': '20.10.2026', 'time': '10:00'},
+        ]
+
+    def test_filter_morning_only(self):
+        res = handlers.filter_slots_for_profile(self.slots, filter_date_days=0, filter_time_pref=1)
+        self.assertTrue(all(int(s['time'].split(':')[0]) < 12 for s in res))
+
+    def test_filter_afternoon_only(self):
+        res = handlers.filter_slots_for_profile(self.slots, filter_date_days=0, filter_time_pref=2)
+        self.assertTrue(all(int(s['time'].split(':')[0]) >= 12 for s in res))
+
+    def test_filter_no_preference(self):
+        res = handlers.filter_slots_for_profile(self.slots, filter_date_days=0, filter_time_pref=0)
+        self.assertEqual(len(res), len(self.slots))
+
+class TestCalendarUtil(unittest.TestCase):
+
+    def test_ics_generation(self):
+        import calendar_util
+        ics = calendar_util.generate_ics_calendar(
+            specialty_name="Kardiyoloji",
+            polyclinic_name="Poliklinik 1",
+            patient_name="Ali Veli",
+            date_str="15.10.2026",
+            time_str="09:30"
+        )
+        self.assertIn(b"BEGIN:VCALENDAR", ics)
+        self.assertIn(b"SUMMARY:AD\xc3\x9c Randevusu: Kardiyoloji", ics)
+        self.assertIn(b"END:VCALENDAR", ics)
+
+    def test_google_calendar_url(self):
+        import calendar_util
+        url = calendar_util.generate_google_calendar_url(
+            specialty_name="Kardiyoloji",
+            polyclinic_name="Poliklinik 1",
+            patient_name="Ali Veli",
+            date_str="15.10.2026",
+            time_str="09:30"
+        )
+        self.assertIn("calendar.google.com", url)
+        self.assertIn("Kardiyoloji", url)
+
+class TestDNDLogic(unittest.TestCase):
+
+    def test_dnd_disabled(self):
+        user = {'dnd_enabled': 0}
+        self.assertFalse(handlers.is_in_dnd(user))
+
+    def test_dnd_active(self):
+        # Window that covers all 24 hours: start=0, end=24
+        user = {'dnd_enabled': 1, 'dnd_start': 0, 'dnd_end': 24}
+        self.assertTrue(handlers.is_in_dnd(user))
+
+class TestKeyboardsPreferences(unittest.TestCase):
+
+    @patch('keyboards.db.get_profile_by_id')
+    def test_profile_prefs_keyboard(self, mock_profile):
+        mock_profile.return_value = {
+            'id': 1,
+            'name': 'Ali',
+            'auto_book': 1,
+            'filter_date_days': 7,
+            'filter_time_pref': 1
+        }
+        kb = keyboards.get_profile_prefs_keyboard(1)
+        self.assertIsNotNone(kb)
+        buttons_text = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("Sniper" in txt and "AÇIK" in txt for txt in buttons_text))
+        self.assertTrue(any("7 Gün" in txt for txt in buttons_text))
+
+    def test_admin_keyboard_metrics(self):
+        kb = keyboards.get_admin_keyboard()
+        buttons_text = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("Sistem Metrikleri" in txt for txt in buttons_text))
+
 if __name__ == '__main__':
     unittest.main()
+

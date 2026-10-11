@@ -5,11 +5,14 @@ import secrets
 import string
 import html
 import math
+import datetime
+from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import db
 import config
 import keyboards
+import calendar_util
 from scraper import ADUScraper
 
 CLEAN_RE = re.compile(r'[^a-z0-9]')
@@ -25,12 +28,10 @@ def clean_turkish(s):
 
 def find_matching_specialty(tracked_id, tracked_name, active_specialties):
     """Matches a user's tracked department with live active specialties by ID or name"""
-    # 1. Match by exact department ID
     for spec_id, spec_name in active_specialties:
         if spec_id == tracked_id:
             return spec_id, spec_name
 
-    # 2. Match by clean name fallback
     cleaned_tracked = clean_turkish(tracked_name)
     for spec_id, spec_name in active_specialties:
         cleaned_active = clean_turkish(spec_name)
@@ -53,6 +54,55 @@ def make_token():
     """Generates a secure random 8-character uppercase invitation token"""
     chars = string.ascii_uppercase + string.digits
     return f"ADU-{''.join(secrets.SystemRandom().choices(chars, k=4))}-{''.join(secrets.SystemRandom().choices(chars, k=4))}"
+
+def is_in_dnd(user) -> bool:
+    """Returns True if user has enabled DND (silent hours) and current Turkey time falls within DND window."""
+    if not user or not user.get('dnd_enabled'):
+        return False
+    tz_tr = datetime.timezone(datetime.timedelta(hours=3))
+    now_hour = datetime.datetime.now(tz_tr).hour
+    start_h = user.get('dnd_start', 23)
+    end_h = user.get('dnd_end', 8)
+    if start_h > end_h:
+        return now_hour >= start_h or now_hour < end_h
+    else:
+        return start_h <= now_hour < end_h
+
+def filter_slots_for_profile(slots, filter_date_days=0, filter_time_pref=0):
+    """Filters slots based on profile's date range and time of day preferences."""
+    if not filter_date_days and not filter_time_pref:
+        return slots
+
+    filtered = []
+    today = datetime.date.today()
+
+    for s in slots:
+        # 1. Time Preference (1: Morning 08:00-11:59, 2: Afternoon 12:00-17:00)
+        if filter_time_pref:
+            m_time = re.search(r'(\d{2}):(\d{2})', s.get('time', ''))
+            if m_time:
+                hour = int(m_time.group(1))
+                if filter_time_pref == 1 and hour >= 12:
+                    continue
+                if filter_time_pref == 2 and hour < 12:
+                    continue
+
+        # 2. Date Filter (within N days from today)
+        if filter_date_days > 0:
+            m_date = re.search(r'(\d{2})\.(\d{2})\.(\d{4})', s.get('date', ''))
+            if m_date:
+                d, m, y = map(int, m_date.groups())
+                try:
+                    slot_date = datetime.date(y, m, d)
+                    diff = (slot_date - today).days
+                    if diff < 0 or diff > filter_date_days:
+                        continue
+                except Exception:
+                    pass
+
+        filtered.append(s)
+
+    return filtered
 
 def get_admin_users_view():
     """Helper to generate the text and keyboard for the authorized users list in Admin Panel"""
@@ -109,7 +159,6 @@ def build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0, page_si
     )
 
     keyboard = []
-    # Slot buttons (2 per row)
     row = []
     for s in current_page_slots:
         slot_key = s.get('key')
@@ -120,7 +169,6 @@ def build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0, page_si
     if row:
         keyboard.append(row)
 
-    # Time paging row (if day has more than page_size slots)
     if total_slot_pages > 1:
         prev_sp = slot_page - 1 if slot_page > 0 else total_slot_pages - 1
         next_sp = slot_page + 1 if slot_page < total_slot_pages - 1 else 0
@@ -130,7 +178,6 @@ def build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0, page_si
             InlineKeyboardButton("Sonraki Saat ▶️", callback_data=f"alert:p:{alert_id}:{date_idx}:{next_sp}"),
         ])
 
-    # Date paging row (if multiple dates available)
     if len(dates) > 1:
         prev_dp = date_idx - 1 if date_idx > 0 else len(dates) - 1
         next_dp = date_idx + 1 if date_idx < len(dates) - 1 else 0
@@ -147,7 +194,6 @@ def build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0, page_si
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
-    # 1. Intercept unauthorized users
     if not check_auth(chat_id):
         unauth_msg = (
             "⚠️ <b>Erişim Yetkiniz Yok!</b>\n\n"
@@ -160,16 +206,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     db.ensure_user_exists(chat_id)
     context.user_data.pop('adding_profile', None)
+    context.user_data.pop('editing_profile', None)
     
     welcome_text = (
         "🏥 <b>ADÜ Hastane Randevu Takip & Otomatik Rezervasyon Botu</b>'na hoş geldiniz!\n\n"
         "Aydın Adnan Menderes Üniversitesi (ADÜ) randevu sisteminde takip ettiğiniz bölümlerde boş slot açıldığında bot anında sizi bilgilendirir "
-        "ve <b>tek tuşla onaylayarak randevu almanızı</b> sağlar.\n\n"
-        "🌟 <b>Neler Yapabilirsiniz?</b>\n"
-        "• <b>Profillerim:</b> Kendiniz veya yakınlarınız için hasta profilleri tanımlayın.\n"
-        "• <b>Takip Ettiklerim:</b> ADÜ bünyesindeki 52 uzmanlık alanından istediklerinizi profil bazında takibe alın.\n"
-        "• <b>Otomatik Tarama:</b> Belirlediğiniz sıklıkta (5-60 dk) arka planda kesintisiz sorgulama yapın.\n"
-        "• <b>Hızlı Rezervasyon:</b> Boş randevu bildirimindeki butona tıklayarak bilgilerinizi hastaneye iletin.\n\n"
+        "ve <b>tek tuşla veya Sniper moduyla otomatik olarak randevu almanızı</b> sağlar.\n\n"
+        "🌟 <b>Temel Özellikler:</b>\n"
+        "• <b>Çoklu Profil:</b> Kendiniz ve yakınlarınız için hasta profilleri tanımlayın.\n"
+        "• <b>Merkezi Hızlı Tarama:</b> Sunucuyu yormadan, tek havuzdan yüksek frekanslı tarama.\n"
+        "• <b>Sniper (Otomatik Al):</b> Boş yer çıktığında beklemeden saniyeler içinde randevu oluşturma.\n"
+        "• <b>Tarih & Saat Filtreleri:</b> Sabah/Öğle ve gün aralığına göre akıllı slot eşleştirme.\n"
+        "• <b>Takvim Entegrasyonu:</b> Randevu alındığında doğrudan Google Calendar ve Apple .ics dosyası gönderimi.\n"
+        "• <b>Veri Güvenliği:</b> T.C. Kimlik ve telefon numaraları veritabanında şifrelenerek saklanır (At-Rest Encrypted).\n\n"
         "<i>Lütfen aşağıdaki menüden işlem seçin:</i>"
     )
     
@@ -190,14 +239,62 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Menüden <i>Profillerim -> Yeni Profil Ekle</i> butonuna basıp hastanın Adını, T.C. Kimlik numarasını, doğum tarihini ve telefonunu girin.\n\n"
         "2️⃣ <b>Bölüm Ekleme:</b>\n"
         "<i>Takip Ettiklerim</i> menüsünden hastanızı seçin. <i>Bölüm Ekle</i> butonuna basarak 52 bölüm arasından istediğinizi işaretleyin (✅).\n\n"
-        "3️⃣ <b>Taramayı Başlatma:</b>\n"
-        "Ana menüden <b>▶️ Taramayı Başlat</b> butonuna tıklayın. Bot periyodik olarak hastane sunucularını taramaya başlar.\n\n"
-        "4️⃣ <b>Randevu Bildirimi & Alma:</b>\n"
-        "Boş slot açıldığında bildirim mesajı ve randevu saati butonu gelir. Butona tek tıkla basarak kaydınızı anında tamamlayabilirsiniz!"
+        "3️⃣ <b>Sniper & Filtreler:</b>\n"
+        "<i>Profillerim -> Profil Detayı -> Filtreler & Sniper Modu</i> adımıyla 'Otomatik Al' seçeneğini ve tarih/saat tercihlerinizi belirleyin.\n\n"
+        "4️⃣ <b>Taramayı Başlatma:</b>\n"
+        "Ana menüden <b>▶️ Taramayı Başlat</b> butonuna tıklayın. Merkezi tarayıcı sistemi boş randevuları düzenli sorgulamaya başlar.\n\n"
+        "5️⃣ <b>Komutlar:</b>\n"
+        "• <b>/stats:</b> Sistem çalışma metrikleri ve istatistikleri\n"
+        "• <b>/ping:</b> Bot ve hastane portalı bağlantı hız testi"
     )
     await update.message.reply_text(text=help_text, parse_mode="HTML")
 
-# --- Text Handler (Wizard & Invitation Code Resolver) ---
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not check_auth(chat_id):
+        return
+
+    stats = db.get_system_stats()
+    stats_text = (
+        "📊 <b>Sistem ve Bot İstatistikleri</b>\n\n"
+        f"🏥 <b>Hastane Durumu:</b> {stats['hospital_status']}\n"
+        f"⚡️ <b>Son Yanıt Süresi:</b> {stats['last_latency_ms']} ms\n"
+        f"🔄 <b>Toplam Yapılan Tarama:</b> {stats['total_scans']:,}\n"
+        f"🚨 <b>Tespit Edilen Boş Slot:</b> {stats['slots_found']:,}\n"
+        f"🎉 <b>Başarılı Randevu Kaydı:</b> {stats['bookings_count']:,}\n\n"
+        f"👥 <b>Yetkili Kullanıcılar:</b> {stats['total_users']}\n"
+        f"🟢 <b>Aktif Tarayan Kullanıcı:</b> {stats['active_scanners']}\n"
+        f"👤 <b>Tanımlı Hasta Profilleri:</b> {stats['total_profiles']}\n"
+        f"💾 <b>Veritabanı Boyutu:</b> {stats['db_size_kb']} KB (WAL Modu)\n"
+        f"🔐 <b>Kişisel Veri Şifreleme:</b> Aktif (PBKDF2-CTR-HMAC)"
+    )
+    await update.message.reply_text(text=stats_text, parse_mode="HTML")
+
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not check_auth(chat_id):
+        return
+
+    msg = await update.message.reply_text("🏓 <i>Hastane sunucusu ve bot gecikmesi test ediliyor...</i>", parse_mode="HTML")
+    t0 = time.perf_counter()
+    scraper = ADUScraper()
+    specs = await scraper.get_specialties(randevu_type=1)
+    lat_ms = int((time.perf_counter() - t0) * 1000)
+
+    if specs:
+        status_txt = f"🟢 <b>Çevrimiçi</b> ({len(specs)} aktif uzmanlık)"
+    else:
+        status_txt = "🔴 <b>Bağlantı Başarısız / Yanıt Yok</b>"
+
+    await msg.edit_text(
+        text=f"🏓 <b>Pong!</b>\n\n"
+             f"🏥 <b>Hastane Portalı:</b> {status_txt}\n"
+             f"⏱️ <b>Gecikme (Latency):</b> <code>{lat_ms} ms</code>\n"
+             f"🤖 <b>Bot Motoru:</b> Aktif ve Hazır",
+        parse_mode="HTML"
+    )
+
+# --- Text Handlers (Wizards & Token Input) ---
 
 async def _handle_unauthorized_user(update: Update, text: str) -> bool:
     """Handles messages from unauthorized users, verifying invitation tokens"""
@@ -288,7 +385,6 @@ async def _handle_profile_wizard(update: Update, context: ContextTypes.DEFAULT_T
             )
             return True
 
-        # Save profile to database
         db.add_profile(
             chat_id=chat_id,
             name=wizard['name'],
@@ -307,12 +403,58 @@ async def _handle_profile_wizard(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(
             text=f"✅ <b>Profil Başarıyla Oluşturuldu!</b>\n\n"
                  f"👤 <b>İsim/Etiket:</b> {profile_name}\n"
-                 f"🆔 <b>T.C. Kimlik:</b> <code>{wizard['tc'][:3]}********</code>\n"
+                 f"🆔 <b>T.C. Kimlik:</b> <code>{wizard['tc'][:3]}********</code> (Şifrelendi 🔐)\n"
                  f"📅 <b>Doğum Tarihi:</b> {wizard['birth']}\n"
                  f"📞 <b>Telefon:</b> {clean_p}\n\n"
-                 f"Artık bu profil için takip listesi oluşturabilirsiniz.",
+                 f"Artık bu profil için takip listesi oluşturabilir ve Sniper/Otomatik Al ayarlarını yapabilirsiniz.",
             parse_mode="HTML",
             reply_markup=keyboard
+        )
+        return True
+
+    return False
+
+async def _handle_profile_edit_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> bool:
+    """Handles text input for editing an existing profile (name or phone)"""
+    if 'editing_profile' not in context.user_data:
+        return False
+
+    edit_data = context.user_data['editing_profile']
+    profile_id = edit_data['profile_id']
+    edit_type = edit_data['type']
+
+    profile = db.get_profile_by_id(profile_id)
+    if not profile:
+        context.user_data.pop('editing_profile', None)
+        await update.message.reply_text("Hata: Profil bulunamadı.", reply_markup=keyboards.get_main_keyboard(chat_id))
+        return True
+
+    if edit_type == 'name':
+        new_name = text.strip()
+        db.update_profile(profile_id, name=new_name)
+        context.user_data.pop('editing_profile', None)
+        await update.message.reply_text(
+            text=f"✅ Profil ismi başarıyla <b>{new_name}</b> olarak güncellendi.",
+            parse_mode="HTML",
+            reply_markup=keyboards.get_profile_view_keyboard(profile_id)
+        )
+        return True
+
+    elif edit_type == 'phone':
+        clean_p = text.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        if not clean_p.isdigit() or len(clean_p) != 11 or not clean_p.startswith("0"):
+            await update.message.reply_text(
+                text="⚠️ <b>Hatalı Telefon Numarası!</b>\n0 ile başlayan 11 haneli numara girin (Örn: <code>05051234567</code>):",
+                parse_mode="HTML"
+            )
+            return True
+
+        db.update_profile(profile_id, telefon=clean_p)
+        context.user_data.pop('editing_profile', None)
+        await update.message.reply_text(
+            text=f"✅ <b>{profile['name']}</b> için telefon numarası başarıyla <code>{clean_p}</code> olarak güncellendi.",
+            parse_mode="HTML",
+            reply_markup=keyboards.get_profile_view_keyboard(profile_id)
         )
         return True
 
@@ -322,35 +464,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
     
-    # 1. Intercept unauthorized users
     if not check_auth(chat_id):
         if await _handle_unauthorized_user(update, text):
             return
 
-    # 2. Wizard handling
     if await _handle_profile_wizard(update, context, chat_id, text):
         return
 
-    # Default message response
+    if await _handle_profile_edit_wizard(update, context, chat_id, text):
+        return
+
     await update.message.reply_text(
         text="⚠️ Menüyü görüntülemek için lütfen /start yazın."
     )
 
-# --- Callback Query Handler ---
+# --- Callback Query Handlers ---
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     chat_id = query.message.chat.id
     
-    # Intercept unauthorized callback clicks
     if not check_auth(chat_id):
         await query.answer("⚠️ Erişim yetkiniz yok!", show_alert=True)
         return
         
     db.ensure_user_exists(chat_id)
     context.user_data.pop('adding_profile', None)
+    context.user_data.pop('editing_profile', None)
     
-    # Noop button (e.g. page info)
     if query.data == "noop":
         await query.answer()
         return
@@ -371,7 +512,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not profiles:
             text = "👤 <b>Kayıtlı profiliniz bulunmamaktadır.</b>\n\nRandevu takibi yapabilmek için 'Yeni Profil Ekle' butonuna basarak ilk profilinizi oluşturun."
         else:
-            text = "👤 <b>Kayıtlı Profilleriniz:</b>\n\nİstediğiniz profilin detaylarını görmek veya silmek için ilgili isme tıklayın."
+            text = "👤 <b>Kayıtlı Profilleriniz:</b>\n\nİstediğiniz profilin detaylarını görmek, filtrelerini ayarlamak veya silmek için ilgili isme tıklayın."
         
         await query.message.edit_text(
             text=text,
@@ -396,17 +537,104 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text("Hata: Profil bulunamadı.", reply_markup=keyboards.get_main_keyboard(chat_id))
             return
             
+        auto_str = "🟢 AKTİF (Sniper)" if profile.get('auto_book') else "⚪️ Pasif (Yalnızca Bildirim)"
+        date_filter_str = f"Önümüzdeki {profile['filter_date_days']} Gün" if profile.get('filter_date_days') else "Tüm Tarihler"
+        time_pref = profile.get('filter_time_pref', 0)
+        time_str = "Tüm Gün" if time_pref == 0 else ("🌅 Sabah (08-12)" if time_pref == 1 else "🌇 Öğle (13-17)")
+
         details = (
             f"👤 <b>Profil Detayları:</b>\n\n"
             f"🏷️ <b>İsim/Etiket:</b> {profile['name']}\n"
-            f"🆔 <b>T.C. Kimlik:</b> <code>{profile['tc_kimlik'][:3]}******{profile['tc_kimlik'][-2:]}</code>\n"
+            f"🆔 <b>T.C. Kimlik:</b> <code>{profile['tc_kimlik'][:3]}******{profile['tc_kimlik'][-2:]}</code> (Şifrelendi 🔐)\n"
             f"📅 <b>Doğum Tarihi:</b> {profile['dogum_tarihi']}\n"
-            f"📞 <b>Telefon:</b> {profile['telefon']}\n"
+            f"📞 <b>Telefon:</b> {profile['telefon']}\n\n"
+            f"⚡️ <b>Sniper Modu (Otomatik Al):</b> {auto_str}\n"
+            f"📅 <b>Tarih Tercihi:</b> {date_filter_str}\n"
+            f"⏰ <b>Saat Tercihi:</b> {time_str}\n"
         )
         await query.message.edit_text(
             text=details,
             parse_mode="HTML",
             reply_markup=keyboards.get_profile_view_keyboard(profile_id)
+        )
+
+    # 4b. Profile Preferences / Sniper View
+    elif query.data.startswith("pref:view:"):
+        profile_id = int(query.data.split(":")[-1])
+        profile = db.get_profile_by_id(profile_id)
+        if not profile:
+            return
+        
+        pref_text = (
+            f"⚡️ <b>{profile['name']} için Sniper & Filtre Ayarları</b>\n\n"
+            f"🎯 <b>Sniper (Otomatik Al):</b> Açık olduğunda bot boş randevu yakaladığı an onay beklemeden doğrudan sizin adınıza randevuyu onaylar!\n\n"
+            f"📅 <b>Tarih Filtresi:</b> Sadece belirlediğiniz gün aralığındaki slotlar kabul edilir.\n"
+            f"⏰ <b>Saat Tercihi:</b> Sadece tercih ettiğiniz sabah/öğle saatleri taranır."
+        )
+        await query.message.edit_text(
+            text=pref_text,
+            parse_mode="HTML",
+            reply_markup=keyboards.get_profile_prefs_keyboard(profile_id)
+        )
+
+    # 4c. Toggle Auto-Book Sniper
+    elif query.data.startswith("pref:toggle_auto:"):
+        profile_id = int(query.data.split(":")[-1])
+        profile = db.get_profile_by_id(profile_id)
+        if profile:
+            new_val = 0 if profile.get('auto_book', 0) else 1
+            db.set_profile_auto_book(profile_id, new_val)
+            stat_lbl = "AÇILDI 🎯" if new_val else "KAPATILDI ⚪️"
+            await query.answer(f"Sniper Modu {stat_lbl}")
+            await query.message.edit_reply_markup(reply_markup=keyboards.get_profile_prefs_keyboard(profile_id))
+
+    # 4d. Set Date Filter
+    elif query.data.startswith("pref:date:"):
+        parts = query.data.split(":")
+        profile_id = int(parts[2])
+        days = int(parts[3])
+        db.set_profile_filter_date(profile_id, days)
+        await query.answer(f"Tarih filtresi: {'Tümü' if days == 0 else f'{days} Gün'}")
+        await query.message.edit_reply_markup(reply_markup=keyboards.get_profile_prefs_keyboard(profile_id))
+
+    # 4e. Set Time Filter
+    elif query.data.startswith("pref:time:"):
+        parts = query.data.split(":")
+        profile_id = int(parts[2])
+        time_pref = int(parts[3])
+        db.set_profile_filter_time(profile_id, time_pref)
+        t_lbl = "Tüm Gün" if time_pref == 0 else ("Sabah" if time_pref == 1 else "Öğle")
+        await query.answer(f"Saat tercihi: {t_lbl}")
+        await query.message.edit_reply_markup(reply_markup=keyboards.get_profile_prefs_keyboard(profile_id))
+
+    # 4f. Edit Profile Menu
+    elif query.data.startswith("profile:edit:"):
+        profile_id = int(query.data.split(":")[-1])
+        profile = db.get_profile_by_id(profile_id)
+        if not profile:
+            return
+        await query.message.edit_text(
+            text=f"✏️ <b>{profile['name']} Profilini Düzenle</b>\n\nGüncellemek istediğiniz alanı seçin:",
+            parse_mode="HTML",
+            reply_markup=keyboards.get_profile_edit_keyboard(profile_id)
+        )
+
+    # 4g. Edit Profile Name Prompt
+    elif query.data.startswith("profile:edit_name:"):
+        profile_id = int(query.data.split(":")[-1])
+        context.user_data['editing_profile'] = {'profile_id': profile_id, 'type': 'name'}
+        await query.message.edit_text(
+            text="✏️ <b>İsim / Etiket Güncelleme:</b>\n\nLütfen bu profil için yeni ismi yazıp gönderin:",
+            parse_mode="HTML"
+        )
+
+    # 4h. Edit Profile Phone Prompt
+    elif query.data.startswith("profile:edit_phone:"):
+        profile_id = int(query.data.split(":")[-1])
+        context.user_data['editing_profile'] = {'profile_id': profile_id, 'type': 'phone'}
+        await query.message.edit_text(
+            text="📞 <b>Telefon Numarası Güncelleme:</b>\n\nLütfen 0 ile başlayan yeni 11 haneli telefon numarasını yazıp gönderin (Örn: <code>05051234567</code>):",
+            parse_mode="HTML"
         )
 
     # 5. Delete Profile
@@ -512,22 +740,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboards.get_track_add_keyboard(profile_id, page=page)
         )
 
-    # 10. Legacy Direct Add (Compatibility)
-    elif query.data.startswith("track:do_add:"):
-        parts = query.data.split(":")
-        profile_id = int(parts[2])
-        spec_id = int(parts[3])
-        profile = db.get_profile_by_id(profile_id)
-        spec_name = config.ADU_DEPARTMENTS.get(spec_id, f"Bölüm ({spec_id})")
-        if profile:
-            db.add_profile_specialty(profile_id, spec_id, spec_name)
-            await query.answer(f"✅ {spec_name} takibe eklendi!")
-        await query.message.edit_text(
-            text=f"✅ <b>{spec_name}</b> bölümü takip listenize eklendi.",
-            parse_mode="HTML",
-            reply_markup=keyboards.get_profile_tracking_keyboard(profile_id)
-        )
-
     # 11. Clear All Specialties for Profile
     elif query.data.startswith("track:clear:"):
         profile_id = int(query.data.split(":")[-1])
@@ -566,16 +778,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboards.get_profile_tracking_keyboard(profile_id)
         )
 
-    # 13. Settings (Interval & Appointment Type Options)
+    # 13. Settings View
     elif query.data == "menu:settings":
         user = db.get_user(chat_id)
         rtype = user.get('randevu_type', 0) if user else 0
         rtype_desc = config.RANDEVU_TYPES.get(rtype, "Tümü")
+        dnd_state = "AÇIK (23:00 - 08:00)" if user.get('dnd_enabled') else "KAPALI"
         await query.message.edit_text(
-            text=f"⚙️ <b>Sorgulama ve Randevu Ayarları</b>\n\n"
+            text=f"⚙️ <b>Sorgulama ve Bildirim Ayarları</b>\n\n"
                  f"⏰ <b>Sorgulama Sıklığı:</b> Boş randevuları kontrol etme periyodu.\n"
-                 f"🏥 <b>Randevu Türü Tercihi:</b> <b>{rtype_desc}</b>\n\n"
-                 f"💡 <i>Özel Öğretim Üyesi seçeneği profesör, doçent ve öğretim üyelerinin saat 15:00 randevularını kapsar.</i>",
+                 f"🏥 <b>Randevu Türü Tercihi:</b> <b>{rtype_desc}</b>\n"
+                 f"🌙 <b>Gece Sessiz Modu:</b> <b>{dnd_state}</b>\n\n"
+                 f"💡 <i>Özel Öğretim Üyesi seçeneği profesör ve doçentlerin saat 15:00 randevularını kapsar.</i>",
             parse_mode="HTML",
             reply_markup=keyboards.get_settings_keyboard(chat_id)
         )
@@ -584,21 +798,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("settings:interval:"):
         interval = int(query.data.split(":")[-1])
         db.set_scan_interval(chat_id, interval)
-        
-        user = db.get_user(chat_id)
-        if user and user['is_scanning']:
-            jobs = context.job_queue.get_jobs_by_name(str(chat_id))
-            for job in jobs:
-                job.schedule_removal()
-            
-            context.job_queue.run_repeating(
-                callback=scan_job,
-                interval=interval * 60,
-                first=5,
-                chat_id=chat_id,
-                name=str(chat_id)
-            )
-            
         await query.message.edit_text(
             text=f"⚙️ Sorgulama sıklığı <b>{interval} dakika</b> olarak ayarlandı.",
             parse_mode="HTML",
@@ -618,21 +817,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboards.get_settings_keyboard(chat_id)
         )
 
+    # 14c. Toggle DND Setting
+    elif query.data == "settings:toggle_dnd":
+        user = db.get_user(chat_id)
+        cur_dnd = user.get('dnd_enabled', 0) if user else 0
+        new_dnd = 0 if cur_dnd else 1
+        db.set_user_dnd(chat_id, new_dnd)
+        dnd_lbl = "AÇILDI 🌙" if new_dnd else "KAPATILDI 🔔"
+        await query.answer(f"Gece Modu {dnd_lbl}")
+        await query.message.edit_reply_markup(reply_markup=keyboards.get_settings_keyboard(chat_id))
+
     # 15. Status Info View
     elif query.data == "menu:status":
         user = db.get_user(chat_id)
         profiles = db.get_profiles(chat_id)
         
-        status_text = "🔄 <b>Sistem Durumu ve Bilgileri</b>\n\n"
+        status_text = "🔄 <b>Sistem ve Tarama Durumu</b>\n\n"
         if not user:
             status_text += "Durum: Başlatılmadı."
         else:
             status_state = "🟢 TARAMA AKTİF" if user['is_scanning'] else "🔴 TARAMA DURDURULDU"
             rtype = user.get('randevu_type', 0)
             rtype_desc = config.RANDEVU_TYPES.get(rtype, "Tümü (Normal + Özel Öğretim Üyesi)")
+            dnd_str = "Açık (Sessiz)" if user.get('dnd_enabled') else "Kapalı (Sesli)"
             status_text += f"⚙️ <b>Tarama Durumu:</b> {status_state}\n"
             status_text += f"⏰ <b>Sorgulama Aralığı:</b> {user['scan_interval']} dakika\n"
-            status_text += f"🏷️ <b>Randevu Türü:</b> {rtype_desc}\n\n"
+            status_text += f"🏷️ <b>Randevu Türü:</b> {rtype_desc}\n"
+            status_text += f"🌙 <b>Gece Sessiz Modu:</b> {dnd_str}\n\n"
             
             status_text += f"👤 <b>Kayıtlı Hastalar ({len(profiles)} kişi):</b>\n"
             if not profiles:
@@ -641,13 +852,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 all_specs = db.get_profiles_specialties([p['id'] for p in profiles])
                 for p in profiles:
                     specs = all_specs.get(p['id'], [])
+                    auto_badge = " [🎯 Sniper]" if p.get('auto_book') else ""
                     if specs:
                         spec_names = ", ".join([s['specialty_name'] for s in specs[:3]])
                         if len(specs) > 3:
                             spec_names += f" ve {len(specs)-3} diğer"
                     else:
                         spec_names = "Takip edilen bölüm yok"
-                    status_text += f"• <b>{p['name']}</b>: <i>{spec_names}</i>\n"
+                    status_text += f"• <b>{p['name']}</b>{auto_badge}: <i>{spec_names}</i>\n"
                 
         await query.message.edit_text(
             text=status_text,
@@ -684,18 +896,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
                 
             db.set_scanning_state(chat_id, True)
-            
-            jobs = context.job_queue.get_jobs_by_name(str(chat_id))
-            for job in jobs:
-                job.schedule_removal()
-                
-            context.job_queue.run_repeating(
-                callback=scan_job,
-                interval=user['scan_interval'] * 60,
-                first=3,
-                chat_id=chat_id,
-                name=str(chat_id)
-            )
+            db.update_user_last_scan(chat_id, 0)
             
             scan_details = ""
             for p in profiles:
@@ -708,13 +909,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🟢 <b>Otomatik tarama başarıyla BAŞLATILDI.</b>\n\n"
                 "🔍 <b>Aktif Takip Listesi:</b>\n"
                 f"{scan_details}\n"
-                "Bot arka planda sürekli olarak hastane sistemini sorgulayacak ve boş randevu yakaladığında sizi anında uyaracaktır."
+                "Merkezi tarayıcı arka planda hastane sistemini sorgulayacak ve boş randevu yakaladığında sizi anında uyaracaktır."
             )
         else:
             db.set_scanning_state(chat_id, False)
-            jobs = context.job_queue.get_jobs_by_name(str(chat_id))
-            for job in jobs:
-                job.schedule_removal()
             text = "🔴 <b>Otomatik tarama DURDURULDU.</b>\n\nArka plan sorgulamaları sonlandırıldı. İstediğiniz zaman tekrar başlatabilirsiniz."
             
         await query.message.edit_text(
@@ -723,7 +921,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboards.get_main_keyboard(chat_id)
         )
 
-    # 17. Perform Instant Auto Book on Click (using cached short slot token)
+    # 17. Perform Instant Auto Book on Click
     elif query.data.startswith("book:"):
         parts = query.data.split(":")
         profile_id = int(parts[1])
@@ -741,15 +939,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Bu randevu seçeneğinin süresi dolmuş veya slot güncellenmiş. Lütfen yeni bildirimi bekleyin.", show_alert=True)
             return
 
-        # Immediate feedback to prevent duplicate taps
         await query.edit_message_text(
             text=query.message.text + f"\n\n⏳ <b>{profile['name']} için {slot_info['time']} randevusu alınıyor... Lütfen bekleyin.</b>",
             parse_mode="HTML"
         )
         
         scraper = ADUScraper()
-        success, message = await asyncio.to_thread(
-            scraper.book_appointment,
+        success, message = await scraper.book_appointment(
             specialty_id=slot_info['specialty_id'],
             polyclinic_id=slot_info['polyclinic_id'],
             slot_id=slot_info['slot_id'],
@@ -765,8 +961,42 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"\n\n🎉 <b>Randevu Başarıyla Alındı!</b>\n"
                 f"✅ Hastane Onay Mesajı: <i>{html.escape(message)}</i>"
             )
-            await query.edit_message_text(text=finished_text, parse_mode="HTML")
+
+            # Generate Google Calendar Link and .ics file
+            gcal_url = calendar_util.generate_google_calendar_url(
+                specialty_name=slot_info.get('specialty_name', 'Uzmanlık'),
+                polyclinic_name=slot_info.get('polyclinic_name', 'Poliklinik'),
+                patient_name=profile['name'],
+                date_str=slot_info['date'],
+                time_str=slot_info['time']
+            )
+            gcal_keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("📅 Google Takvime Ekle", url=gcal_url)
+            ]])
+            await query.edit_message_text(text=finished_text, parse_mode="HTML", reply_markup=gcal_keyboard)
             await query.answer("Randevunuz başarıyla alınmıştır! 🎉", show_alert=True)
+
+            # Send .ics attachment
+            try:
+                ics_bytes = calendar_util.generate_ics_calendar(
+                    specialty_name=slot_info.get('specialty_name', 'Uzmanlık'),
+                    polyclinic_name=slot_info.get('polyclinic_name', 'Poliklinik'),
+                    patient_name=profile['name'],
+                    date_str=slot_info['date'],
+                    time_str=slot_info['time']
+                )
+                ics_stream = BytesIO(ics_bytes)
+                ics_stream.name = f"ADU_Randevu_{profile['name']}.ics"
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=ics_stream,
+                    filename=ics_stream.name,
+                    caption="📎 <b>Takvim Dosyası:</b> Randevunuzu telefonunuzun yerel takvimine eklemek için dosyayı açabilirsiniz.",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                config.logger.warning(f"Could not send .ics file: {e}")
+
         else:
             failed_text = (
                 query.message.text + 
@@ -807,25 +1037,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auth_users_count = len([u for u in auth_users if str(u['chat_id']) != config.ADMIN_CHAT_ID])
         
         admin_text = (
-            f"🔑 <b>ADÜ Bot Yetki Yönetim Paneli</b>\n\n"
+            f"🔑 <b>ADÜ Bot Yetki & Sistem Yönetim Paneli</b>\n\n"
             f"👥 <b>Yetkili Aktif Kullanıcılar:</b> {auth_users_count} kişi (Siz hariç)\n"
             f"📜 <b>Kullanılmamış Davet Kodları:</b> {len(unused_tokens)} adet\n\n"
-            f"Aşağıdaki butonları kullanarak davet kodları üretebilir veya kullanıcı yetkilerini silebilirsiniz."
+            f"Aşağıdaki butonları kullanarak davet kodları üretebilir, kullanıcıları yönetebilir veya sistem metriklerini izleyebilirsiniz."
         )
-        keyboard = [
-            [
-                InlineKeyboardButton("➕ Davet Kodu Üret", callback_data="admin:gen_token"),
-                InlineKeyboardButton("📜 Aktif Kodları Gör", callback_data="admin:list_tokens")
-            ],
-            [
-                InlineKeyboardButton("👥 Kullanıcıları Listele", callback_data="admin:list_users")
-            ],
-            [
-                InlineKeyboardButton("🔙 Ana Menü", callback_data="menu:main")
-            ]
-        ]
         await query.message.edit_text(
             text=admin_text,
+            parse_mode="HTML",
+            reply_markup=keyboards.get_admin_keyboard()
+        )
+
+    elif query.data == "admin:metrics":
+        if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
+            await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
+            return
+
+        stats = db.get_system_stats()
+        metrics_text = (
+            "📊 <b>Canlı Sistem Metrikleri & Teşhis Paneli</b>\n\n"
+            f"🏥 <b>Hastane Bağlantı Durumu:</b> {stats['hospital_status']}\n"
+            f"⚡️ <b>Son Yanıt Süresi (Latency):</b> {stats['last_latency_ms']} ms\n\n"
+            f"📈 <b>Toplam Tarama Döngüsü:</b> {stats['total_scans']:,}\n"
+            f"🚨 <b>Yakalana Boş Slot Sayısı:</b> {stats['slots_found']:,}\n"
+            f"🎯 <b>Başarıyla Alınan Randevular:</b> {stats['bookings_count']:,}\n\n"
+            f"👥 <b>Kayıtlı Kullanıcı Sayısı:</b> {stats['total_users']}\n"
+            f"🟢 <b>Şu An Tarama Yapanlar:</b> {stats['active_scanners']}\n"
+            f"👤 <b>Toplam Hasta Profilleri:</b> {stats['total_profiles']}\n\n"
+            f"💾 <b>SQLite Boyutu:</b> {stats['db_size_kb']} KB\n"
+            f"⚡️ <b>WAL Günlük Modu:</b> Aktif\n"
+            f"🔐 <b>Veri Şifreleme:</b> PBKDF2 + CTR + HMAC-SHA256"
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")]]
+        await query.message.edit_text(
+            text=metrics_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -925,10 +1170,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         user_to_revoke = query.data.split(":")[-1]
-        jobs = context.job_queue.get_jobs_by_name(str(user_to_revoke))
-        for job in jobs:
-            job.schedule_removal()
-            
         try:
             await context.bot.send_message(
                 chat_id=user_to_revoke,
@@ -948,157 +1189,285 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=users_markup
         )
 
-# --- Background Scanning Job Callback ---
+# --- Centralized Background Scanning Worker ---
 
-async def scan_job(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.job.chat_id
-    user = db.get_user(chat_id)
-    
-    if not user or not user['is_scanning'] or not user.get('is_authorized', 0):
-        context.job.schedule_removal()
+async def central_scan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Centralized high-performance background scanner (Fan-Out Pub-Sub).
+    Collects all unique departments tracked across due users, scrapes each once,
+    and broadcasts/auto-books to individual users without duplicate requests.
+    """
+    active_users = db.get_active_users()
+    if not active_users:
         return
-        
-    profiles = db.get_profiles(chat_id)
-    if not profiles:
+
+    now = time.time()
+    due_users = []
+    for u in active_users:
+        last = u.get('last_scan_time', 0)
+        interval_secs = max(60, int(u.get('scan_interval', 15)) * 60)
+        if now - last >= interval_secs or last == 0:
+            due_users.append(u)
+
+    if not due_users:
         return
-        
-    config.logger.info(f"Background hospital scan starting for chat_id: {chat_id}")
+
+    config.logger.info(f"Central scan cycle started for {len(due_users)} due users.")
+    db.increment_metric("total_scans")
+    db.set_metric("last_scan_time", str(now))
+
+    # Collect all profiles and tracked specialties for due users
+    user_profiles_map = {}
+    all_needed_specs = set() # (spec_id, spec_name, rtype)
     
-    preferred_rtype = user.get('randevu_type', 0)
-    if preferred_rtype == 1:
-        types_to_scan = [1]
-    elif preferred_rtype == 2:
-        types_to_scan = [2]
-    else:
-        types_to_scan = [1, 2]  # Scans both Normal and Özel Öğretim Üyesi!
+    for u in due_users:
+        chat_id = u['chat_id']
+        db.update_user_last_scan(chat_id, now)
+        profiles = db.get_profiles(chat_id)
+        if not profiles:
+            continue
+        user_profiles_map[chat_id] = profiles
+
+        p_ids = [p['id'] for p in profiles]
+        profile_specs = db.get_profiles_specialties(p_ids)
+
+        preferred_rtype = u.get('randevu_type', 0)
+        rtypes = [1, 2] if preferred_rtype == 0 else [preferred_rtype]
+
+        for p in profiles:
+            specs = profile_specs.get(p['id'], [])
+            for s in specs:
+                for rt in rtypes:
+                    all_needed_specs.add((s['specialty_id'], s['specialty_name'], rt))
+
+    if not all_needed_specs:
+        return
 
     scraper = ADUScraper()
-    all_tracked_specs = db.get_profiles_specialties([p['id'] for p in profiles])
+    active_specs_cache = {}  # rtype -> active_specs list
+    polyclinic_cache = {}    # (spec_id, rtype) -> polyclinics list
+    slots_cache = {}         # (spec_id, poly_id, rtype) -> slots list
 
-    # Per-cycle cache to avoid duplicate network calls for shared departments
-    polyclinic_cache = {}  # (spec_id, rtype) -> list of polyclinic dicts
-    slots_cache = {}       # (spec_id, poly_id, rtype) -> list of slots
+    # Ensure memory structures exist on bot_data
+    if 'sent_alerts' not in context.bot_data:
+        context.bot_data['sent_alerts'] = {}
+    if 'slot_cache' not in context.bot_data:
+        context.bot_data['slot_cache'] = {}
+    if 'slot_alerts' not in context.bot_data:
+        context.bot_data['slot_alerts'] = {}
 
-    for rtype in types_to_scan:
-        rtype_label = "🌟 Özel Öğretim Üyesi (15:00)" if rtype == 2 else "🩺 Normal Randevu"
-        active_specs = await asyncio.to_thread(scraper.get_specialties, randevu_type=rtype)
-        if not active_specs:
+    # Prune memory structures if large
+    if len(context.bot_data['slot_alerts']) > 100:
+        context.bot_data['slot_alerts'] = {
+            k: v for k, v in context.bot_data['slot_alerts'].items()
+            if now - v.get('timestamp', 0) < 7200
+        }
+    if len(context.bot_data['slot_cache']) > 500:
+        context.bot_data['slot_cache'] = {
+            k: v for k, v in context.bot_data['slot_cache'].items()
+            if now - v.get('timestamp', 0) < 7200
+        }
+
+    # Execute central queries for needed departments
+    for spec_id, spec_name, rtype in all_needed_specs:
+        if rtype not in active_specs_cache:
+            active_specs_cache[rtype] = await scraper.get_specialties(randevu_type=rtype)
+
+        active_specs = active_specs_cache[rtype]
+        match = find_matching_specialty(spec_id, spec_name, active_specs)
+        if not match:
             continue
 
+        active_id, active_name = match
+        poly_key = (active_id, rtype)
+        if poly_key not in polyclinic_cache:
+            await asyncio.sleep(0.5)
+            polyclinic_cache[poly_key] = await scraper.get_polyclinics(active_id, randevu_type=rtype)
+
+        polys = polyclinic_cache[poly_key]
+        for poly in polys:
+            poly_id = poly['id']
+            slots_key = (active_id, poly_id, rtype)
+            if slots_key not in slots_cache:
+                await asyncio.sleep(0.5)
+                slots_cache[slots_key] = await scraper.check_slots(active_id, poly_id, randevu_type=rtype)
+
+    # Fan-out: match results to each due user's profiles
+    for u in due_users:
+        chat_id = u['chat_id']
+        silent_mode = is_in_dnd(u)
+        profiles = user_profiles_map.get(chat_id, [])
+        if not profiles:
+            continue
+
+        p_ids = [p['id'] for p in profiles]
+        profile_specs = db.get_profiles_specialties(p_ids)
+
+        preferred_rtype = u.get('randevu_type', 0)
+        rtypes = [1, 2] if preferred_rtype == 0 else [preferred_rtype]
+
         for profile in profiles:
-            tracked_specs = all_tracked_specs.get(profile['id'], [])
-            if not tracked_specs:
-                continue
+            specs = profile_specs.get(profile['id'], [])
+            for s in specs:
+                spec_id = s['specialty_id']
+                spec_name = s['specialty_name']
 
-            for tracked in tracked_specs:
-                match = find_matching_specialty(tracked['specialty_id'], tracked['specialty_name'], active_specs)
-                if not match:
-                    continue
-
-                active_id, active_name = match
-                config.logger.info(f"Tracked department '{tracked['specialty_name']}' is ACTIVE on site for {rtype_label} (ID: {active_id}).")
-
-                # Fetch polyclinics
-                cache_key_poly = (active_id, rtype)
-                if cache_key_poly not in polyclinic_cache:
-                    await asyncio.sleep(0.8)
-                    polyclinic_cache[cache_key_poly] = await asyncio.to_thread(scraper.get_polyclinics, active_id, randevu_type=rtype)
-
-                polyclinics = polyclinic_cache[cache_key_poly]
-                if not polyclinics:
-                    continue
-
-                # Check slots for each polyclinic
-                for poly in polyclinics:
-                    poly_id = poly['id']
-                    cache_key_slots = (active_id, poly_id, rtype)
-                    if cache_key_slots not in slots_cache:
-                        await asyncio.sleep(0.8)
-                        slots_cache[cache_key_slots] = await asyncio.to_thread(scraper.check_slots, active_id, poly_id, randevu_type=rtype)
-
-                    slots = slots_cache[cache_key_slots]
-                    if not slots:
+                for rtype in rtypes:
+                    rtype_label = "🌟 Özel Öğretim Üyesi (15:00)" if rtype == 2 else "🩺 Normal Randevu"
+                    active_specs = active_specs_cache.get(rtype, [])
+                    match = find_matching_specialty(spec_id, spec_name, active_specs)
+                    if not match:
                         continue
 
-                    config.logger.info(f"FOUND {len(slots)} free slots in {poly['name']} ({rtype_label})!")
+                    active_id, active_name = match
+                    polys = polyclinic_cache.get((active_id, rtype), [])
+                    for poly in polys:
+                        poly_id = poly['id']
+                        raw_slots = slots_cache.get((active_id, poly_id, rtype), [])
+                        if not raw_slots:
+                            continue
 
-                    # Group slots by date preserving chronological order
-                    slots_by_date = {}
-                    for slot in slots:
-                        d = slot.get('date', 'Bilinmeyen Tarih')
-                        slots_by_date.setdefault(d, []).append(slot)
+                        # Apply profile filters (date range and time preference)
+                        matched_slots = filter_slots_for_profile(
+                            raw_slots,
+                            filter_date_days=profile.get('filter_date_days', 0),
+                            filter_time_pref=profile.get('filter_time_pref', 0)
+                        )
+                        if not matched_slots:
+                            continue
 
-                    dates = list(slots_by_date.keys())
-                    if not dates:
-                        continue
+                        db.increment_metric("slots_found", len(matched_slots))
 
-                    now = time.time()
-                    if 'sent_alerts' not in context.bot_data:
-                        context.bot_data['sent_alerts'] = {}
-                    if 'slot_cache' not in context.bot_data:
-                        context.bot_data['slot_cache'] = {}
-                    if 'slot_alerts' not in context.bot_data:
-                        context.bot_data['slot_alerts'] = {}
+                        # --- AUTO-BOOK SNIPER MODE ---
+                        if profile.get('auto_book') == 1:
+                            target_slot = matched_slots[0]
+                            config.logger.info(f"SNIPER TRIGGERED for {profile['name']} at {target_slot['time']}!")
 
-                    alert_key = f"{profile['id']}_{poly_id}_{rtype}"
-                    last_sent = context.bot_data['sent_alerts'].get(alert_key, 0)
-                    # Don't repeat the exact same polyclinic alert within 45 minutes
-                    if now - last_sent < 2700:
-                        continue
+                            success, book_msg = await scraper.book_appointment(
+                                specialty_id=active_id,
+                                polyclinic_id=poly_id,
+                                slot_id=target_slot['slot_id'],
+                                tc_kimlik=profile['tc_kimlik'],
+                                dogum_tarihi=profile['dogum_tarihi'],
+                                telefon=profile['telefon'],
+                                randevu_type=rtype
+                            )
 
-                    context.bot_data['sent_alerts'][alert_key] = now
+                            if success:
+                                gcal_url = calendar_util.generate_google_calendar_url(
+                                    specialty_name=active_name,
+                                    polyclinic_name=poly['name'],
+                                    patient_name=profile['name'],
+                                    date_str=target_slot['date'],
+                                    time_str=target_slot['time'],
+                                    rtype_label=rtype_label
+                                )
+                                kb = InlineKeyboardMarkup([[
+                                    InlineKeyboardButton("📅 Google Takvime Ekle", url=gcal_url)
+                                ]])
+                                sniper_success_text = (
+                                    f"🎯 <b>OTOMATİK RANDEVU ALINDI! (SNIPER MODU)</b>\n\n"
+                                    f"👤 <b>Hasta:</b> {profile['name']} (<code>{profile['tc_kimlik'][:3]}***</code>)\n"
+                                    f"🏷️ <b>Tür:</b> {rtype_label}\n"
+                                    f"🏥 <b>Bölüm:</b> {active_name}\n"
+                                    f"🩺 <b>Hekim/Poliklinik:</b> {poly['name']}\n"
+                                    f"📅 <b>Tarih & Saat:</b> <b>{target_slot['date']} {target_slot['time']}</b>\n\n"
+                                    f"✅ <i>Hastane Onay Mesajı: {html.escape(book_msg)}</i>"
+                                )
+                                await context.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=sniper_success_text,
+                                    parse_mode="HTML",
+                                    reply_markup=kb,
+                                    disable_notification=silent_mode
+                                )
 
-                    # Prune old cache entries if large (older than 2 hours)
-                    if len(context.bot_data['slot_alerts']) > 100:
-                        context.bot_data['slot_alerts'] = {
-                            k: v for k, v in context.bot_data['slot_alerts'].items()
-                            if now - v.get('timestamp', 0) < 7200
+                                # Send .ics calendar attachment
+                                try:
+                                    ics_bytes = calendar_util.generate_ics_calendar(
+                                        specialty_name=active_name,
+                                        polyclinic_name=poly['name'],
+                                        patient_name=profile['name'],
+                                        date_str=target_slot['date'],
+                                        time_str=target_slot['time'],
+                                        rtype_label=rtype_label
+                                    )
+                                    ics_stream = BytesIO(ics_bytes)
+                                    ics_stream.name = f"ADU_Randevu_{profile['name']}.ics"
+                                    await context.bot.send_document(
+                                        chat_id=chat_id,
+                                        document=ics_stream,
+                                        filename=ics_stream.name,
+                                        caption="📎 <b>Takvim Daveti:</b> Randevunuzu telefon takviminize ekleyebilirsiniz.",
+                                        disable_notification=silent_mode
+                                    )
+                                except Exception as e:
+                                    config.logger.warning(f"Failed sending .ics in sniper mode: {e}")
+                                continue
+
+                        # --- MANUAL NOTIFICATION MODE ---
+                        alert_key = f"{profile['id']}_{poly_id}_{rtype}"
+                        last_sent = context.bot.data['sent_alerts'].get(alert_key, 0)
+                        if now - last_sent < 2700:
+                            continue
+
+                        context.bot_data['sent_alerts'][alert_key] = now
+
+                        slots_by_date = {}
+                        for slot in matched_slots:
+                            d = slot.get('date', 'Bilinmeyen Tarih')
+                            slots_by_date.setdefault(d, []).append(slot)
+
+                        dates = list(slots_by_date.keys())
+                        if not dates:
+                            continue
+
+                        for d, d_slots in slots_by_date.items():
+                            for s in d_slots:
+                                slot_key = secrets.token_hex(4)
+                                s['key'] = slot_key
+                                context.bot_data['slot_cache'][slot_key] = {
+                                    'specialty_id': active_id,
+                                    'specialty_name': active_name,
+                                    'polyclinic_id': poly_id,
+                                    'polyclinic_name': poly['name'],
+                                    'slot_id': s['slot_id'],
+                                    'date': s.get('date', d),
+                                    'time': s['time'],
+                                    'doctor': s.get('doctor', ''),
+                                    'randevu_type': rtype,
+                                    'timestamp': now
+                                }
+
+                        alert_id = secrets.token_hex(4)
+                        alert_data = {
+                            'profile_id': profile['id'],
+                            'profile_name': profile['name'],
+                            'tc_masked': f"{profile['tc_kimlik'][:3]}***",
+                            'rtype_label': rtype_label,
+                            'specialty_name': active_name,
+                            'polyclinic_name': poly['name'],
+                            'dates': dates,
+                            'slots_by_date': slots_by_date,
+                            'all_slots': matched_slots,
+                            'timestamp': now
                         }
-                    if len(context.bot_data['slot_cache']) > 500:
-                        context.bot_data['slot_cache'] = {
-                            k: v for k, v in context.bot_data['slot_cache'].items()
-                            if now - v.get('timestamp', 0) < 7200
-                        }
+                        context.bot_data['slot_alerts'][alert_id] = alert_data
 
-                    # Assign short token keys for direct 1-click booking
-                    for d, d_slots in slots_by_date.items():
-                        for s in d_slots:
-                            slot_key = secrets.token_hex(4)
-                            s['key'] = slot_key
-                            context.bot_data['slot_cache'][slot_key] = {
-                                'specialty_id': active_id,
-                                'polyclinic_id': poly_id,
-                                'slot_id': s['slot_id'],
-                                'date': s.get('date', d),
-                                'time': s['time'],
-                                'doctor': s.get('doctor', ''),
-                                'randevu_type': rtype,
-                                'timestamp': now
-                            }
+                        msg_text, reply_markup = build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0)
 
-                    alert_id = secrets.token_hex(4)
-                    alert_data = {
-                        'profile_id': profile['id'],
-                        'profile_name': profile['name'],
-                        'tc_masked': f"{profile['tc_kimlik'][:3]}***",
-                        'rtype_label': rtype_label,
-                        'specialty_name': active_name,
-                        'polyclinic_name': poly['name'],
-                        'dates': dates,
-                        'slots_by_date': slots_by_date,
-                        'all_slots': slots,
-                        'timestamp': now
-                    }
-                    context.bot_data['slot_alerts'][alert_id] = alert_data
+                        try:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text=msg_text,
+                                parse_mode="HTML",
+                                reply_markup=reply_markup,
+                                disable_notification=silent_mode
+                            )
+                        except Exception as e:
+                            config.logger.error(f"Error sending slot alert to {chat_id}: {e}")
 
-                    msg_text, reply_markup = build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0)
-
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=msg_text,
-                        parse_mode="HTML",
-                        reply_markup=reply_markup
-                    )
+# Compatibility alias for central_scan_job
+scan_job = central_scan_job
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Global error handler for all unhandled bot exceptions"""
