@@ -93,12 +93,14 @@ class TestMakeToken(unittest.TestCase):
 class TestDepartments(unittest.TestCase):
 
     def test_all_departments_count(self):
-        """Verify that all 52 official hospital departments are registered"""
-        self.assertEqual(len(config.ADU_DEPARTMENTS), 52)
+        """Verify that all official hospital departments are registered"""
+        self.assertEqual(len(config.ADU_DEPARTMENTS), 53)
         self.assertIn(208, config.ADU_DEPARTMENTS) # Aile Hekimliği
         self.assertIn(260, config.ADU_DEPARTMENTS) # Kardiyoloji
         self.assertIn(288, config.ADU_DEPARTMENTS) # Göz
+        self.assertIn(389, config.ADU_DEPARTMENTS) # Çocuk Hematolojisi (Özel)
         self.assertIn(-147, config.ADU_DEPARTMENTS) # Yara Bakım Ünitesi
+        self.assertEqual(len(config.RANDEVU_TYPES), 3)
 
     def test_matching_specialty_by_id(self):
         """Verify matching by exact department ID"""

@@ -28,7 +28,13 @@ def init_db():
             cursor.execute("ALTER TABLE users ADD COLUMN is_authorized INTEGER DEFAULT 0;")
             conn.commit()
         except sqlite3.OperationalError:
-            # Column already exists, safe to ignore
+            pass
+
+        # Migration-safe: Try adding randevu_type column (0: Tümü, 1: Normal, 2: Özel Öğretim Üyesi)
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN randevu_type INTEGER DEFAULT 0;")
+            conn.commit()
+        except sqlite3.OperationalError:
             pass
         
         # 2. Profiles table (multiple patients under one user)
@@ -93,6 +99,15 @@ def set_scan_interval(chat_id, interval):
         cursor.execute("""
             UPDATE users SET scan_interval = ? WHERE chat_id = ?
         """, (int(interval), str(chat_id)))
+        conn.commit()
+
+def set_randevu_type(chat_id, randevu_type):
+    ensure_user_exists(chat_id)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users SET randevu_type = ? WHERE chat_id = ?
+        """, (int(randevu_type), str(chat_id)))
         conn.commit()
 
 def set_scanning_state(chat_id, is_scanning):

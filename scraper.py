@@ -44,19 +44,21 @@ class ADUScraper:
             return token_input.get('value')
         return self._get_forgery_token(html)
 
-    def get_specialties(self):
-        """Step 1 & Step 2: Returns list of available active departments [(spec_id, spec_name)]"""
+    def get_specialties(self, randevu_type=1):
+        """Step 1 & Step 2: Returns list of available active departments [(spec_id, spec_name)].
+        randevu_type: 1 = Normal Randevu, 2 = Özel Öğretim Üyesi Randevusu"""
         self._reset_session()
         try:
-            logger.info("Fetching main page /1")
+            type_label = "Özel Öğretim Üyesi" if int(randevu_type) == 2 else "Normal Randevu"
+            logger.info(f"Fetching specialties for {type_label} (type={randevu_type})...")
+            
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
             token1 = self._get_forgery_token(r1.text)
             if not token1:
                 logger.error("Forgery token not found on /1")
                 return []
 
-            # Step 1: Normal Randevu (param: 1)
-            logger.info("POST /Step01/Operation")
+            # Step 1: Select randevu_type (1: Normal, 2: Özel Öğretim Üyesi)
             post_headers = {
                 "Content-Type": "application/json; charset=utf-8",
                 "VerificationToken": token1,
@@ -66,18 +68,17 @@ class ADUScraper:
             }
             r_post = self.session.post(
                 f"{BASE_URL}/Step01/Operation",
-                json={"param": 1},
+                json={"param": int(randevu_type)},
                 headers={**self.headers, **post_headers},
                 timeout=15
             )
 
             res_op1 = r_post.json() if r_post.text else {}
             if not res_op1.get("IsStatus"):
-                logger.error("Step 1 Operation failed")
+                logger.error(f"Step 1 Operation failed for randevu_type={randevu_type}")
                 return []
 
             # Step 2: Fetch /2
-            logger.info("Fetching /2")
             r2 = self.session.get(f"{BASE_URL}/2", headers=self.headers, timeout=15)
             soup2 = BeautifulSoup(r2.text, 'html.parser')
 
@@ -102,18 +103,18 @@ class ADUScraper:
 
                     specialties.append((spec_id, spec_name))
 
-            logger.info(f"Retrieved {len(specialties)} active specialties from ADU.")
+            logger.info(f"Retrieved {len(specialties)} active specialties for randevu_type={randevu_type}.")
             return specialties
 
         except Exception as e:
-            logger.error(f"Error fetching specialties: {e}", exc_info=True)
+            logger.error(f"Error fetching specialties (type={randevu_type}): {e}", exc_info=True)
             return []
 
-    def get_polyclinics(self, specialty_id):
+    def get_polyclinics(self, specialty_id, randevu_type=1):
         """Step 3: Returns list of active polyclinics [{'id': poly_id, 'name': poly_name}] for a given specialty"""
         self._reset_session()
         try:
-            logger.info(f"Navigating to polyclinics for specialty {specialty_id}")
+            logger.info(f"Navigating to polyclinics for specialty={specialty_id}, type={randevu_type}")
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
             token1 = self._get_forgery_token(r1.text)
             if not token1:
@@ -126,7 +127,7 @@ class ADUScraper:
                 "Origin": BASE_URL,
                 "Referer": f"{BASE_URL}/1"
             }
-            self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": 1}, headers={**self.headers, **post_headers1}, timeout=15)
+            self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": int(randevu_type)}, headers={**self.headers, **post_headers1}, timeout=15)
 
             # Step 2: Select specialty
             post_headers2 = {
@@ -170,14 +171,14 @@ class ADUScraper:
                             "name": poly_name
                         })
 
-            logger.info(f"Retrieved {len(polyclinics)} active polyclinics for specialty {specialty_id}.")
+            logger.info(f"Retrieved {len(polyclinics)} active polyclinics for specialty={specialty_id}, type={randevu_type}.")
             return polyclinics
 
         except Exception as e:
             logger.error(f"Error fetching polyclinics for specialty {specialty_id}: {e}", exc_info=True)
             return []
 
-    def check_slots(self, specialty_id, polyclinic_id):
+    def check_slots(self, specialty_id, polyclinic_id, randevu_type=1):
         """Step 4: Returns list of available appointment slots [{'slot_id': slot_token, 'date': date, 'time': time, 'doctor': doctor}]"""
         self._reset_session()
         try:
@@ -194,7 +195,7 @@ class ADUScraper:
                 "Origin": BASE_URL,
                 "Referer": f"{BASE_URL}/1"
             }
-            self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": 1}, headers={**self.headers, **post_headers1}, timeout=15)
+            self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": int(randevu_type)}, headers={**self.headers, **post_headers1}, timeout=15)
 
             # Step 2
             post_headers2 = {
@@ -288,18 +289,18 @@ class ADUScraper:
                             "doctor": "Poliklinik Hekimi"
                         })
 
-            logger.info(f"Retrieved {len(slots)} free slots for polyclinic {polyclinic_id}.")
+            logger.info(f"Retrieved {len(slots)} free slots for polyclinic {polyclinic_id} (type={randevu_type}).")
             return slots
 
         except Exception as e:
             logger.error(f"Error checking slots: {e}", exc_info=True)
             return []
 
-    def book_appointment(self, specialty_id, polyclinic_id, slot_id, tc_kimlik, dogum_tarihi, telefon):
+    def book_appointment(self, specialty_id, polyclinic_id, slot_id, tc_kimlik, dogum_tarihi, telefon, randevu_type=1):
         """Step 5: Submits personal details and completes the appointment reservation"""
         self._reset_session()
         try:
-            logger.info(f"Starting booking reservation for specialty={specialty_id}, polyclinic={polyclinic_id}...")
+            logger.info(f"Starting booking reservation for specialty={specialty_id}, polyclinic={polyclinic_id}, type={randevu_type}...")
 
             # Step 1
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
@@ -314,7 +315,7 @@ class ADUScraper:
                 "Origin": BASE_URL,
                 "Referer": f"{BASE_URL}/1"
             }
-            self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": 1}, headers={**self.headers, **post_headers1}, timeout=15)
+            self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": int(randevu_type)}, headers={**self.headers, **post_headers1}, timeout=15)
 
             # Step 2
             post_headers2 = {
@@ -384,7 +385,7 @@ class ADUScraper:
                 "ceptel": str(telefon).strip()
             }
 
-            logger.info("Submitting personal details to /Step05/Operation...")
+            logger.info(f"Submitting personal details to /Step05/Operation (type={randevu_type})...")
             r_confirm = self.session.post(
                 f"{BASE_URL}/Step05/Operation",
                 json=confirm_data,

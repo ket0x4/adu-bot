@@ -132,8 +132,11 @@ def get_track_add_keyboard(profile_id, page=0, page_size=8):
 def get_settings_keyboard(chat_id):
     user = db.get_user(chat_id)
     current_interval = user['scan_interval'] if user else 15
+    current_rtype = user.get('randevu_type', 0) if user else 0
     
     keyboard = []
+    
+    # 1. Interval options row
     intervals = [5, 10, 15, 30, 60]
     row = []
     for i in intervals:
@@ -144,6 +147,20 @@ def get_settings_keyboard(chat_id):
             row = []
     if row:
         keyboard.append(row)
+
+    # 2. Randevu Type section
+    keyboard.append([InlineKeyboardButton("─── Randevu Türü Tercihi ───", callback_data="noop")])
+    
+    types = [
+        (0, "🌟 Tümü (Normal + Özel Öğretim)"),
+        (1, "🩺 Sadece Normal Randevu"),
+        (2, "👨‍🏫 Sadece Özel Öğretim Üyesi")
+    ]
+    for r_val, label in types:
+        prefix = "✅ " if r_val == current_rtype else "🔘 "
+        keyboard.append([
+            InlineKeyboardButton(f"{prefix}{label}", callback_data=f"settings:rtype:{r_val}")
+        ])
         
     keyboard.append([InlineKeyboardButton("🔙 Ana Menü", callback_data="menu:main")])
     return InlineKeyboardMarkup(keyboard)

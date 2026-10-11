@@ -95,8 +95,16 @@ ADU_DEPARTMENTS = {
     325: "Tıbbi Genetik",
     306: "Tıbbi Onkoloji (Medikal Onkoloji)",
     285: "Üroloji",
+    389: "Çocuk Hematolojisi ve Onkolojisi (Özel)",
     -147: "Yara Bakım Ünitesi",
 }
 
 # Alias for backwards compatibility
 POPULAR_DEPARTMENTS = ADU_DEPARTMENTS
+
+# Randevu Types
+RANDEVU_TYPES = {
+    0: "Tümü (Normal + Özel Öğretim Üyesi)",
+    1: "Normal Randevu (08:00 - 17:00)",
+    2: "Özel Öğretim Üyesi (15:00)"
+}
