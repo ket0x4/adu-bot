@@ -4,6 +4,7 @@ import asyncio
 import secrets
 import string
 import html
+import math
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import db
@@ -77,6 +78,67 @@ def get_admin_users_view():
                 InlineKeyboardButton(f"❌ Revoke ID: {chat_id_str} {profiles_str}", callback_data=f"admin:revoke:{chat_id_str}")
             ])
         keyboard.append([InlineKeyboardButton("🔙 Yetki Paneli", callback_data="menu:admin")])
+
+    return text, InlineKeyboardMarkup(keyboard)
+
+def build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0, page_size=6):
+    """Builds an interactive paginated view for appointment alerts across dates and hours"""
+    dates = alert_data.get('dates', [])
+    if not dates:
+        return "Randevu bulunamadı.", InlineKeyboardMarkup([])
+
+    date_idx = max(0, min(date_idx, len(dates) - 1))
+    current_date = dates[date_idx]
+    day_slots = alert_data['slots_by_date'].get(current_date, [])
+
+    total_slot_pages = max(1, math.ceil(len(day_slots) / page_size))
+    slot_page = max(0, min(slot_page, total_slot_pages - 1))
+
+    start_s = slot_page * page_size
+    current_page_slots = day_slots[start_s : start_s + page_size]
+
+    text = (
+        f"🚨 <b>ADÜ BOŞ RANDEVU BİLDİRİMİ!</b>\n\n"
+        f"👤 <b>Hasta Profili:</b> {alert_data['profile_name']} ({alert_data['tc_masked']})\n"
+        f"🏷️ <b>Randevu Türü:</b> <b>{alert_data['rtype_label']}</b>\n"
+        f"🏥 <b>Ana Bölüm:</b> {alert_data['specialty_name']}\n"
+        f"🩺 <b>Poliklinik/Hekim:</b> {alert_data['polyclinic_name']}\n"
+        f"📅 <b>Seçili Tarih:</b> <b>{current_date}</b> ({len(day_slots)} slot)\n"
+        f"📊 <b>Toplam Boş Randevu:</b> {len(alert_data['all_slots'])} slot ({len(dates)} farklı gün)\n\n"
+        f"⚡️ <i>Randevu almak istediğiniz saatin butonuna basarak kaydınızı anında tamamlayabilirsiniz:</i>"
+    )
+
+    keyboard = []
+    # Slot buttons (2 per row)
+    row = []
+    for s in current_page_slots:
+        slot_key = s.get('key')
+        row.append(InlineKeyboardButton(f"⚡️ {s['time']} Al", callback_data=f"book:{alert_data['profile_id']}:{slot_key}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    # Time paging row (if day has more than page_size slots)
+    if total_slot_pages > 1:
+        prev_sp = slot_page - 1 if slot_page > 0 else total_slot_pages - 1
+        next_sp = slot_page + 1 if slot_page < total_slot_pages - 1 else 0
+        keyboard.append([
+            InlineKeyboardButton("◀️ Önceki Saat", callback_data=f"alert:p:{alert_id}:{date_idx}:{prev_sp}"),
+            InlineKeyboardButton(f"📄 Saat {slot_page + 1}/{total_slot_pages}", callback_data="noop"),
+            InlineKeyboardButton("Sonraki Saat ▶️", callback_data=f"alert:p:{alert_id}:{date_idx}:{next_sp}"),
+        ])
+
+    # Date paging row (if multiple dates available)
+    if len(dates) > 1:
+        prev_dp = date_idx - 1 if date_idx > 0 else len(dates) - 1
+        next_dp = date_idx + 1 if date_idx < len(dates) - 1 else 0
+        keyboard.append([
+            InlineKeyboardButton("⏮️ Önceki Gün", callback_data=f"alert:p:{alert_id}:{prev_dp}:0"),
+            InlineKeyboardButton(f"📅 Gün {date_idx + 1}/{len(dates)}", callback_data="noop"),
+            InlineKeyboardButton("Sonraki Gün ⏭️", callback_data=f"alert:p:{alert_id}:{next_dp}:0"),
+        ])
 
     return text, InlineKeyboardMarkup(keyboard)
 
@@ -714,8 +776,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text=failed_text, parse_mode="HTML")
             await query.answer(f"Randevu alma başarısız: {message}", show_alert=True)
 
+    # 18. Paginated Slot Alerts Navigation
+    elif query.data.startswith("alert:p:"):
+        parts = query.data.split(":")
+        alert_id = parts[2]
+        date_idx = int(parts[3])
+        slot_page = int(parts[4])
+        
+        alert_data = context.bot_data.get('slot_alerts', {}).get(alert_id)
+        if not alert_data:
+            await query.answer("Bu bildirim güncellenmiş veya süresi dolmuş.", show_alert=True)
+            return
+            
+        text, reply_markup = build_slot_alert_view(alert_data, alert_id, date_idx=date_idx, slot_page=slot_page)
+        try:
+            await query.message.edit_text(text=text, parse_mode="HTML", reply_markup=reply_markup)
+        except Exception:
+            pass
+        await query.answer()
+
     # --- Master Admin Panel Handlers ---
-    
+
     elif query.data == "menu:admin":
         if not config.ADMIN_CHAT_ID or str(chat_id) != config.ADMIN_CHAT_ID:
             await query.answer("⚠️ Yetkiniz yok!", show_alert=True)
@@ -941,68 +1022,83 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE):
 
                     config.logger.info(f"FOUND {len(slots)} free slots in {poly['name']} ({rtype_label})!")
 
-                    # Group slots by date
+                    # Group slots by date preserving chronological order
                     slots_by_date = {}
                     for slot in slots:
-                        d = slot['date']
+                        d = slot.get('date', 'Bilinmeyen Tarih')
                         slots_by_date.setdefault(d, []).append(slot)
+
+                    dates = list(slots_by_date.keys())
+                    if not dates:
+                        continue
 
                     now = time.time()
                     if 'sent_alerts' not in context.bot_data:
                         context.bot_data['sent_alerts'] = {}
+                    if 'slot_cache' not in context.bot_data:
+                        context.bot_data['slot_cache'] = {}
+                    if 'slot_alerts' not in context.bot_data:
+                        context.bot_data['slot_alerts'] = {}
 
-                    for date_val, day_slots in slots_by_date.items():
-                        alert_key = f"{profile['id']}_{poly_id}_{date_val}_{rtype}"
-                        last_sent = context.bot_data['sent_alerts'].get(alert_key, 0)
-                        # Don't repeat the exact same date alert within 45 minutes
-                        if now - last_sent < 2700:
-                            continue
+                    alert_key = f"{profile['id']}_{poly_id}_{rtype}"
+                    last_sent = context.bot_data['sent_alerts'].get(alert_key, 0)
+                    # Don't repeat the exact same polyclinic alert within 45 minutes
+                    if now - last_sent < 2700:
+                        continue
 
-                        context.bot_data['sent_alerts'][alert_key] = now
+                    context.bot_data['sent_alerts'][alert_key] = now
 
-                        # Take top 3 earliest slots to show direct booking buttons
-                        earliest_slots = day_slots[:3]
-                        keyboard_rows = []
+                    # Prune old cache entries if large (older than 2 hours)
+                    if len(context.bot_data['slot_alerts']) > 100:
+                        context.bot_data['slot_alerts'] = {
+                            k: v for k, v in context.bot_data['slot_alerts'].items()
+                            if now - v.get('timestamp', 0) < 7200
+                        }
+                    if len(context.bot_data['slot_cache']) > 500:
+                        context.bot_data['slot_cache'] = {
+                            k: v for k, v in context.bot_data['slot_cache'].items()
+                            if now - v.get('timestamp', 0) < 7200
+                        }
 
-                        for s in earliest_slots:
+                    # Assign short token keys for direct 1-click booking
+                    for d, d_slots in slots_by_date.items():
+                        for s in d_slots:
                             slot_key = secrets.token_hex(4)
-                            context.bot_data.setdefault('slot_cache', {})[slot_key] = {
+                            s['key'] = slot_key
+                            context.bot_data['slot_cache'][slot_key] = {
                                 'specialty_id': active_id,
                                 'polyclinic_id': poly_id,
                                 'slot_id': s['slot_id'],
-                                'date': s['date'],
+                                'date': s.get('date', d),
                                 'time': s['time'],
-                                'doctor': s['doctor'],
+                                'doctor': s.get('doctor', ''),
                                 'randevu_type': rtype,
                                 'timestamp': now
                             }
-                            cb_data = f"book:{profile['id']}:{slot_key}"
-                            keyboard_rows.append([
-                                InlineKeyboardButton(f"⚡️ {s['time']} Randevusunu Al", callback_data=cb_data)
-                            ])
 
-                        times_summary = ", ".join([s['time'] for s in day_slots[:8]])
-                        if len(day_slots) > 8:
-                            times_summary += f" ... (+{len(day_slots)-8} slot)"
+                    alert_id = secrets.token_hex(4)
+                    alert_data = {
+                        'profile_id': profile['id'],
+                        'profile_name': profile['name'],
+                        'tc_masked': f"{profile['tc_kimlik'][:3]}***",
+                        'rtype_label': rtype_label,
+                        'specialty_name': active_name,
+                        'polyclinic_name': poly['name'],
+                        'dates': dates,
+                        'slots_by_date': slots_by_date,
+                        'all_slots': slots,
+                        'timestamp': now
+                    }
+                    context.bot_data['slot_alerts'][alert_id] = alert_data
 
-                        msg = (
-                            f"🚨 <b>ADÜ BOŞ RANDEVU BULUNDU!</b>\n\n"
-                            f"👤 <b>Hasta Profili:</b> {profile['name']} ({profile['tc_kimlik'][:3]}***)\n"
-                            f"🏷️ <b>Randevu Türü:</b> <b>{rtype_label}</b>\n"
-                            f"🏥 <b>Ana Bölüm:</b> {active_name}\n"
-                            f"🩺 <b>Poliklinik/Hekim:</b> {poly['name']}\n"
-                            f"📅 <b>Tarih:</b> {date_val}\n"
-                            f"⏰ <b>Uygun Saatler:</b> {times_summary}\n"
-                            f"📊 <b>Toplam Boş Slot:</b> {len(day_slots)} adet\n\n"
-                            f"⚡️ <i>Aşağıdaki butona basarak doğrudan bu hekimden randevunuzu onaylayabilirsiniz:</i>"
-                        )
+                    msg_text, reply_markup = build_slot_alert_view(alert_data, alert_id, date_idx=0, slot_page=0)
 
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=msg,
-                            parse_mode="HTML",
-                            reply_markup=InlineKeyboardMarkup(keyboard_rows)
-                        )
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=msg_text,
+                        parse_mode="HTML",
+                        reply_markup=reply_markup
+                    )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Global error handler for all unhandled bot exceptions"""

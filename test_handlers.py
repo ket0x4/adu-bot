@@ -146,5 +146,87 @@ class TestKeyboardsPagination(unittest.TestCase):
         kb_clamped = keyboards.get_track_add_keyboard(profile_id=1, page=999, page_size=8)
         self.assertIsNotNone(kb_clamped)
 
+class TestSlotAlertView(unittest.TestCase):
+
+    def setUp(self):
+        self.alert_data = {
+            'profile_id': 1,
+            'profile_name': 'Ahmet Yılmaz',
+            'tc_masked': '123***',
+            'rtype_label': '🩺 Normal Randevu',
+            'specialty_name': 'Kardiyoloji',
+            'polyclinic_name': 'Kardiyoloji Polikliniği 1',
+            'dates': ['15.10.2026', '16.10.2026'],
+            'slots_by_date': {
+                '15.10.2026': [
+                    {'key': 'abc1', 'time': '09:00', 'slot_id': 's1'},
+                    {'key': 'abc2', 'time': '09:30', 'slot_id': 's2'},
+                    {'key': 'abc3', 'time': '10:00', 'slot_id': 's3'},
+                    {'key': 'abc4', 'time': '10:30', 'slot_id': 's4'},
+                    {'key': 'abc5', 'time': '11:00', 'slot_id': 's5'},
+                    {'key': 'abc6', 'time': '11:30', 'slot_id': 's6'},
+                    {'key': 'abc7', 'time': '13:00', 'slot_id': 's7'},
+                    {'key': 'abc8', 'time': '13:30', 'slot_id': 's8'},
+                ],
+                '16.10.2026': [
+                    {'key': 'abc9', 'time': '14:00', 'slot_id': 's9'},
+                ]
+            },
+            'all_slots': [{'key': f'abc{i}', 'time': 'time', 'slot_id': f's{i}'} for i in range(1, 10)],
+            'timestamp': 100000.0
+        }
+
+    def test_build_slot_alert_view_content(self):
+        text, markup = handlers.build_slot_alert_view(self.alert_data, "testalert", date_idx=0, slot_page=0)
+        self.assertIn("ADÜ BOŞ RANDEVU BİLDİRİMİ", text)
+        self.assertIn("Ahmet Yılmaz", text)
+        self.assertIn("15.10.2026", text)
+        self.assertIn("Kardiyoloji Polikliniği 1", text)
+        self.assertIsNotNone(markup)
+
+    def test_build_slot_alert_view_pagination_controls(self):
+        # 15.10.2026 has 8 slots, page size is 6 -> total_slot_pages = 2
+        # dates has 2 dates -> date navigation present
+        text, markup = handlers.build_slot_alert_view(self.alert_data, "testalert", date_idx=0, slot_page=0)
+        buttons = [btn for row in markup.inline_keyboard for btn in row]
+        
+        # Check slot buttons on page 0: 6 slots
+        slot_buttons = [b for b in buttons if b.callback_data.startswith("book:1:")]
+        self.assertEqual(len(slot_buttons), 6)
+
+        # Check time paging buttons
+        time_nav = [b for b in buttons if "Saat" in b.text]
+        self.assertTrue(len(time_nav) >= 2)
+
+        # Check date paging buttons
+        date_nav = [b for b in buttons if "Gün" in b.text]
+        self.assertTrue(len(date_nav) >= 2)
+
+        # Ensure all callback_data are <= 64 bytes
+        for btn in buttons:
+            self.assertLessEqual(len(btn.callback_data.encode('utf-8')), 64)
+
+    def test_build_slot_alert_view_second_page(self):
+        text, markup = handlers.build_slot_alert_view(self.alert_data, "testalert", date_idx=0, slot_page=1)
+        buttons = [btn for row in markup.inline_keyboard for btn in row]
+        slot_buttons = [b for b in buttons if b.callback_data.startswith("book:1:")]
+        # Remaining 2 slots on page 1 (8 - 6 = 2)
+        self.assertEqual(len(slot_buttons), 2)
+        self.assertEqual(slot_buttons[0].text, "⚡️ 13:00 Al")
+        self.assertEqual(slot_buttons[1].text, "⚡️ 13:30 Al")
+
+    def test_build_slot_alert_view_second_date(self):
+        text, markup = handlers.build_slot_alert_view(self.alert_data, "testalert", date_idx=1, slot_page=0)
+        self.assertIn("16.10.2026", text)
+        buttons = [btn for row in markup.inline_keyboard for btn in row]
+        slot_buttons = [b for b in buttons if b.callback_data.startswith("book:1:")]
+        self.assertEqual(len(slot_buttons), 1)
+        self.assertEqual(slot_buttons[0].text, "⚡️ 14:00 Al")
+
+    def test_build_slot_alert_view_empty_dates(self):
+        text, markup = handlers.build_slot_alert_view({'dates': []}, "empty")
+        self.assertIn("Randevu bulunamadı", text)
+        self.assertEqual(len(markup.inline_keyboard), 0)
+
 if __name__ == '__main__':
     unittest.main()
