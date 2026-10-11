@@ -1,3 +1,4 @@
+import math
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import db
 import config
@@ -22,7 +23,7 @@ def get_main_keyboard(chat_id):
         ]
     ]
     
-    # If this is the Master Admin, append the Authorization Panel button!
+    # If this is the Master Admin, append the Authorization Panel button
     if config.ADMIN_CHAT_ID and str(chat_id) == config.ADMIN_CHAT_ID:
         keyboard.append([InlineKeyboardButton("🔑 Yetki Paneli (Admin)", callback_data="menu:admin")])
         
@@ -40,6 +41,7 @@ def get_profiles_keyboard(chat_id):
 
 def get_profile_view_keyboard(profile_id):
     keyboard = [
+        [InlineKeyboardButton("🏥 Takip Listesini Yönet", callback_data=f"track:profile:{profile_id}")],
         [InlineKeyboardButton("❌ Profili Sil", callback_data=f"profile:delete:{profile_id}")],
         [InlineKeyboardButton("🔙 Profillerim", callback_data="menu:profiles")]
     ]
@@ -56,29 +58,75 @@ def get_tracking_keyboard(chat_id):
 def get_profile_tracking_keyboard(profile_id):
     tracked = db.get_profile_specialties(profile_id)
     keyboard = []
+    
+    # List tracked specialties with remove button
     for t in tracked:
         keyboard.append([
             InlineKeyboardButton(f"❌ {t['specialty_name']}", callback_data=f"track:remove:{profile_id}:{t['specialty_id']}")
         ])
-    keyboard.append([InlineKeyboardButton("➕ Bölüm Ekle", callback_data=f"track:add:{profile_id}")])
+    
+    # Action buttons
+    actions = [InlineKeyboardButton("➕ Bölüm Ekle / Listele", callback_data=f"track:add:{profile_id}:0")]
+    if len(tracked) > 1:
+        actions.append(InlineKeyboardButton("🗑️ Tümünü Temizle", callback_data=f"track:clear:{profile_id}"))
+    keyboard.append(actions)
+    
     keyboard.append([InlineKeyboardButton("🔙 Geri", callback_data="menu:tracking")])
     return InlineKeyboardMarkup(keyboard)
 
-def get_track_add_keyboard(profile_id):
+def get_track_add_keyboard(profile_id, page=0, page_size=8):
+    """Paginated keyboard showing ALL 52 departments with toggle indicators"""
+    # Alphabetically sorted list of all departments
+    turkish_sort_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+    sorted_deps = sorted(
+        config.ADU_DEPARTMENTS.items(),
+        key=lambda item: item[1].translate(turkish_sort_map).lower()
+    )
+    
+    total_items = len(sorted_deps)
+    total_pages = max(1, math.ceil(total_items / page_size))
+    
+    # Clamp page index
+    page = max(0, min(page, total_pages - 1))
+    
+    start_idx = page * page_size
+    end_idx = min(start_idx + page_size, total_items)
+    page_items = sorted_deps[start_idx:end_idx]
+    
+    # Get currently tracked specialties for this profile
+    tracked_list = db.get_profile_specialties(profile_id)
+    tracked_ids = {t['specialty_id'] for t in tracked_list}
+    
     keyboard = []
     row = []
-    for spec_id, name in config.POPULAR_DEPARTMENTS.items():
-        # Display short names in buttons to fit perfectly on screens
+    for spec_id, name in page_items:
+        is_tracked = spec_id in tracked_ids
+        prefix = "✅ " if is_tracked else "➕ "
+        
+        # Format name to fit nicely on Telegram buttons
         short_name = name.split(" (")[0] if " (" in name else name
-        short_name = short_name[:15] + "..." if len(short_name) > 17 else short_name
-        row.append(InlineKeyboardButton(f"➕ {short_name}", callback_data=f"track:do_add:{profile_id}:{spec_id}"))
+        short_name = short_name[:14] + ".." if len(short_name) > 16 else short_name
+        
+        btn_text = f"{prefix}{short_name}"
+        cb_data = f"track:toggle:{profile_id}:{spec_id}:{page}"
+        row.append(InlineKeyboardButton(btn_text, callback_data=cb_data))
         if len(row) == 2:
             keyboard.append(row)
             row = []
     if row:
         keyboard.append(row)
         
-    keyboard.append([InlineKeyboardButton("🔙 İptal", callback_data=f"track:profile:{profile_id}")])
+    # Navigation row
+    nav_row = []
+    if total_pages > 1:
+        prev_page = page - 1 if page > 0 else total_pages - 1
+        next_page = page + 1 if page < total_pages - 1 else 0
+        nav_row.append(InlineKeyboardButton("◀️ Önceki", callback_data=f"track:add:{profile_id}:{prev_page}"))
+        nav_row.append(InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data="noop"))
+        nav_row.append(InlineKeyboardButton("Sonraki ▶️", callback_data=f"track:add:{profile_id}:{next_page}"))
+        keyboard.append(nav_row)
+        
+    keyboard.append([InlineKeyboardButton("🔙 Bitti / Geri Dön", callback_data=f"track:profile:{profile_id}")])
     return InlineKeyboardMarkup(keyboard)
 
 def get_settings_keyboard(chat_id):

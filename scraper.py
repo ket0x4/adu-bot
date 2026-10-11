@@ -2,26 +2,34 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import logging
+import config
 
 logger = logging.getLogger("adu_bot.scraper")
 
 BASE_URL = "https://randevu.adu.edu.tr"
 
-RE_STEP02 = re.compile(r'Step02Operation\((\d+)\)')
+# Regex patterns matching actual MiaMed / ADU online randevu HTML & JS
+RE_STEP02 = re.compile(r'Step02Operation\((-?\d+)\)')
 RE_STEP03 = re.compile(r'Step03Operation\((\d+)\)')
-RE_STEP04 = re.compile(r'Step04Operation\((\d+)\)')
-RE_TIME = re.compile(r'(\d{2}:\d{2})')
+RE_STEP04 = re.compile(r'Step04Operation\([\"\'](.*?)[\"\']\)')
+RE_STEP05 = re.compile(r'Step05Operation\([\"\'](.*?)[\"\']\)')
+RE_TIME = re.compile(r'(\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2})?)')
 
 class ADUScraper:
     def __init__(self):
         self.session = requests.Session()
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
         }
 
+    def _reset_session(self):
+        """Creates a fresh session to prevent state leakage between multi-step operations"""
+        self.session = requests.Session()
+
     def _get_forgery_token(self, html):
+        """Extracts forgery token from #forgeryTokenShared"""
         soup = BeautifulSoup(html, 'html.parser')
         token_input = soup.find('input', {'id': 'forgeryTokenShared'})
         if token_input:
@@ -29,14 +37,16 @@ class ADUScraper:
         return None
 
     def _get_request_verification_token(self, html):
+        """Extracts __RequestVerificationToken or falls back to forgeryTokenShared"""
         soup = BeautifulSoup(html, 'html.parser')
         token_input = soup.find('input', {'name': '__RequestVerificationToken'})
         if token_input:
             return token_input.get('value')
-        return None
+        return self._get_forgery_token(html)
 
     def get_specialties(self):
-        """Step 1 & Step 2: Returns a list of available departments/specialties [(id, name)]"""
+        """Step 1 & Step 2: Returns list of available active departments [(spec_id, spec_name)]"""
+        self._reset_session()
         try:
             logger.info("Fetching main page /1")
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
@@ -45,7 +55,7 @@ class ADUScraper:
                 logger.error("Forgery token not found on /1")
                 return []
 
-            # Click Normal Randevu (param: 1)
+            # Step 1: Normal Randevu (param: 1)
             logger.info("POST /Step01/Operation")
             post_headers = {
                 "Content-Type": "application/json; charset=utf-8",
@@ -60,140 +70,160 @@ class ADUScraper:
                 headers={**self.headers, **post_headers},
                 timeout=15
             )
-            
-            if not r_post.json().get("IsStatus"):
+
+            res_op1 = r_post.json() if r_post.text else {}
+            if not res_op1.get("IsStatus"):
                 logger.error("Step 1 Operation failed")
                 return []
 
-            # Fetch Step 2 page
+            # Step 2: Fetch /2
             logger.info("Fetching /2")
             r2 = self.session.get(f"{BASE_URL}/2", headers=self.headers, timeout=15)
             soup2 = BeautifulSoup(r2.text, 'html.parser')
-            
+
             specialties = []
-            # Parse specialties from buttons with onclick="Step02Operation(id)"
-            buttons = soup2.find_all('button', onclick=True)
-            for btn in buttons:
-                match = RE_STEP02.search(btn.get('onclick', ''))
+            seen_ids = set()
+
+            # Find all elements (a or button) with Step02Operation(id)
+            for el in soup2.find_all(attrs={'onclick': RE_STEP02}):
+                onclick = el.get('onclick', '')
+                match = RE_STEP02.search(onclick)
                 if match:
                     spec_id = int(match.group(1))
-                    spec_name = btn.get_text().strip()
+                    if spec_id in seen_ids:
+                        continue
+                    seen_ids.add(spec_id)
+
+                    # Lookup canonical Turkish name from config
+                    spec_name = config.ADU_DEPARTMENTS.get(spec_id)
+                    if not spec_name:
+                        el_text = el.get_text(strip=True)
+                        spec_name = el_text if el_text else f"Uzmanlık ({spec_id})"
+
                     specialties.append((spec_id, spec_name))
-            
-            # If empty, it means all slots are full and the page is blank.
-            # We return empty, but in bot we will allow choosing from a fallback/hardcoded list as well!
+
+            logger.info(f"Retrieved {len(specialties)} active specialties from ADU.")
             return specialties
 
         except Exception as e:
-            logger.error(f"Error fetching specialties: {e}")
+            logger.error(f"Error fetching specialties: {e}", exc_info=True)
             return []
 
     def get_polyclinics(self, specialty_id):
-        """Step 3: Returns a list of active polyclinics [(id, name)] for a given specialty"""
+        """Step 3: Returns list of active polyclinics [{'id': poly_id, 'name': poly_name}] for a given specialty"""
+        self._reset_session()
         try:
-            # We must go through Step 1 and Step 2 sequentially to establish the session
-            logger.info(f"Establishing session for specialty {specialty_id}")
+            logger.info(f"Navigating to polyclinics for specialty {specialty_id}")
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
             token1 = self._get_forgery_token(r1.text)
-            
+            if not token1:
+                return []
+
             post_headers1 = {
                 "Content-Type": "application/json; charset=utf-8",
                 "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/1"
             }
             self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": 1}, headers={**self.headers, **post_headers1}, timeout=15)
-            
-            r2 = self.session.get(f"{BASE_URL}/2", headers=self.headers, timeout=15)
-            token2 = self._get_forgery_token(r2.text) or token1
-            
+
+            # Step 2: Select specialty
             post_headers2 = {
                 "Content-Type": "application/json; charset=utf-8",
-                "VerificationToken": token2,
+                "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/2"
             }
             r_post2 = self.session.post(
                 f"{BASE_URL}/Step02/Operation",
-                json={"param": specialty_id},
+                json={"param": int(specialty_id)},
                 headers={**self.headers, **post_headers2},
                 timeout=15
             )
-            
-            if not r_post2.json().get("IsStatus"):
+
+            res_op2 = r_post2.json() if r_post2.text else {}
+            if not res_op2.get("IsStatus"):
                 logger.error(f"Specialty ID {specialty_id} was rejected by Step 2")
                 return []
 
-            # Fetch Step 3 page
-            logger.info("Fetching /3")
+            # Step 3: Fetch /3
             r3 = self.session.get(f"{BASE_URL}/3", headers=self.headers, timeout=15)
             soup3 = BeautifulSoup(r3.text, 'html.parser')
-            
+
             polyclinics = []
-            # Parse polyclinics from Step03Operation(id) in buttons inside table
-            buttons = soup3.find_all('button', onclick=True)
-            for btn in buttons:
-                match = RE_STEP03.search(btn.get('onclick', ''))
-                if match:
-                    poly_id = int(match.group(1))
-                    poly_name = btn.find_parent('tr').find('td').get_text().strip() if btn.find_parent('tr') else "Poliklinik"
-                    polyclinics.append((poly_id, poly_name))
-                    
+            for tr in soup3.find_all('tr'):
+                tds = tr.find_all('td')
+                if not tds:
+                    continue
+
+                poly_name = tds[0].get_text(strip=True)
+                # Check for active appointment button with Step03Operation
+                action_el = tds[1].find(attrs={'onclick': RE_STEP03}) if len(tds) > 1 else tr.find(attrs={'onclick': RE_STEP03})
+                if action_el:
+                    match = RE_STEP03.search(action_el.get('onclick', ''))
+                    if match:
+                        poly_id = int(match.group(1))
+                        polyclinics.append({
+                            "id": poly_id,
+                            "name": poly_name
+                        })
+
+            logger.info(f"Retrieved {len(polyclinics)} active polyclinics for specialty {specialty_id}.")
             return polyclinics
 
         except Exception as e:
-            logger.error(f"Error fetching polyclinics for specialty {specialty_id}: {e}")
+            logger.error(f"Error fetching polyclinics for specialty {specialty_id}: {e}", exc_info=True)
             return []
 
     def check_slots(self, specialty_id, polyclinic_id):
-        """Step 4: Returns a list of available slots [{slot_id, date, time, doctor}]"""
+        """Step 4: Returns list of available appointment slots [{'slot_id': slot_token, 'date': date, 'time': time, 'doctor': doctor}]"""
+        self._reset_session()
         try:
-            # Re-establish navigation state
+            # Step 1
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
             token1 = self._get_forgery_token(r1.text)
-            
+            if not token1:
+                return []
+
             post_headers1 = {
                 "Content-Type": "application/json; charset=utf-8",
                 "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/1"
             }
             self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": 1}, headers={**self.headers, **post_headers1}, timeout=15)
-            
-            r2 = self.session.get(f"{BASE_URL}/2", headers=self.headers, timeout=15)
-            token2 = self._get_forgery_token(r2.text) or token1
+
+            # Step 2
             post_headers2 = {
                 "Content-Type": "application/json; charset=utf-8",
-                "VerificationToken": token2,
+                "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/2"
             }
-            self.session.post(f"{BASE_URL}/Step02/Operation", json={"param": specialty_id}, headers={**self.headers, **post_headers2}, timeout=15)
-            
-            r3 = self.session.get(f"{BASE_URL}/3", headers=self.headers, timeout=15)
-            token3 = self._get_forgery_token(r3.text) or token1
+            r_post2 = self.session.post(f"{BASE_URL}/Step02/Operation", json={"param": int(specialty_id)}, headers={**self.headers, **post_headers2}, timeout=15)
+            if not (r_post2.json() if r_post2.text else {}).get("IsStatus"):
+                return []
+
+            # Step 3
             post_headers3 = {
                 "Content-Type": "application/json; charset=utf-8",
-                "VerificationToken": token3,
+                "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/3"
             }
-            r_post3 = self.session.post(
-                f"{BASE_URL}/Step03/Operation",
-                json={"param": polyclinic_id},
-                headers={**self.headers, **post_headers3},
-                timeout=15
-            )
-            
-            if not r_post3.json().get("IsStatus"):
-                logger.error(f"Polyclinic ID {polyclinic_id} rejected by Step 3")
+            r_post3 = self.session.post(f"{BASE_URL}/Step03/Operation", json={"param": int(polyclinic_id)}, headers={**self.headers, **post_headers3}, timeout=15)
+            if not (r_post3.json() if r_post3.text else {}).get("IsStatus"):
                 return []
 
-            # Fetch Step 4 page
-            logger.info("Fetching /4")
+            # Step 4: GET /4
             r4 = self.session.get(f"{BASE_URL}/4", headers=self.headers, timeout=15)
-            req_token = self._get_request_verification_token(r4.text)
-            if not req_token:
-                logger.error("__RequestVerificationToken not found on /4")
-                return []
+            req_token = self._get_request_verification_token(r4.text) or token1
 
-            # Request OperationWeek
-            logger.info("POST /Step04/OperationWeek")
             week_headers = {
                 "Content-Type": "application/json; charset=utf-8",
                 "VerificationToken": req_token,
@@ -201,116 +231,116 @@ class ADUScraper:
                 "Origin": BASE_URL,
                 "Referer": f"{BASE_URL}/4"
             }
-            
-            # We pass uygunMu: True to only search for open/free slots!
+
+            # Query available days (uygunMu: True jumps directly to available days)
             r_week = self.session.post(
                 f"{BASE_URL}/Step04/OperationWeek",
                 json={"WeekNumber": 0, "uygunMu": True},
                 headers={**self.headers, **week_headers},
                 timeout=15
             )
-            
-            res_json = r_week.json()
+
+            res_json = r_week.json() if r_week.text else {}
             if not res_json.get("IsStatus"):
-                logger.error("OperationWeek returned status False")
+                # Fallback to current week without uygunMu filter
+                r_week = self.session.post(
+                    f"{BASE_URL}/Step04/OperationWeek",
+                    json={"WeekNumber": 0, "uygunMu": False},
+                    headers={**self.headers, **week_headers},
+                    timeout=15
+                )
+                res_json = r_week.json() if r_week.text else {}
+
+            if not res_json.get("IsStatus"):
                 return []
-                
+
             thead_html = res_json.get("IsData", "")
             tbody_html = res_json.get("IsTbodyData", "")
-            
+
             # Parse dates from thead
-            soup_thead = BeautifulSoup(thead_html, 'html.parser')
-            cols = soup_thead.find_all('th')
-            dates = []
-            for col in cols:
-                # Text looks like "18.05.2026 Pazartesi"
-                date_text = col.get_text().strip().replace('\n', ' ')
-                dates.append(date_text)
-                
-            # Parse slots from tbody
-            soup_tbody = BeautifulSoup(tbody_html, 'html.parser')
+            thead_soup = BeautifulSoup(thead_html, 'html.parser')
+            dates = [th.get_text(strip=True, separator=' ') for th in thead_soup.find_all('th')]
+
+            # In MiaMed Step 4, IsTbodyData contains top-level <td> elements, one per date column
+            tbody_soup = BeautifulSoup(tbody_html, 'html.parser')
+            day_tds = [c for c in tbody_soup.children if getattr(c, 'name', None) == 'td']
+            if not day_tds:
+                day_tds = tbody_soup.find_all('td', style=lambda s: s and 'vertical-align:top' in s)
+            if not day_tds:
+                day_tds = tbody_soup.find_all('td', recursive=False)
+
             slots = []
-            
-            # Each row is a time slot (e.g. 09:00)
-            rows = soup_tbody.find_all('tr')
-            for row in rows:
-                cells = row.find_all('td')
-                # The first cell might contain the time, or it is a standard table
-                # Let's inspect buttons inside cells
-                for col_idx, cell in enumerate(cells):
-                    # We match columns to the dates array
-                    date_val = dates[col_idx] if col_idx < len(dates) else "Bilinmeyen Tarih"
-                    
-                    # Find all buttons that call Step04Operation(id)
-                    buttons = cell.find_all('button', onclick=True)
-                    for btn in buttons:
-                        match = RE_STEP04.search(btn.get('onclick', ''))
-                        if match:
-                            slot_id = int(match.group(1))
-                            btn_text = btn.get_text().strip() # E.g., "09:00 BOŞ" or "09:00 \n BOŞ"
-                            
-                            # Extract time
-                            time_match = RE_TIME.search(btn_text)
-                            slot_time = time_match.group(1) if time_match else "00:00"
-                            
-                            # Extract doctor/details from parent elements if visible
-                            doctor = "Poliklinik Hekimi"
-                            
-                            slots.append({
-                                "slot_id": slot_id,
-                                "date": date_val,
-                                "time": slot_time,
-                                "doctor": doctor
-                            })
-                            
+            for col_idx, day_td in enumerate(day_tds):
+                date_val = dates[col_idx] if col_idx < len(dates) else "Bilinmeyen Tarih"
+                for el in day_td.find_all(['a', 'button'], onclick=True):
+                    onclick = el.get('onclick', '')
+                    m = RE_STEP04.search(onclick)
+                    if m:
+                        slot_param = m.group(1)
+                        btn_text = el.get_text(strip=True)
+                        time_match = RE_TIME.search(btn_text)
+                        slot_time = time_match.group(1) if time_match else btn_text
+
+                        slots.append({
+                            "slot_id": slot_param,
+                            "date": date_val,
+                            "time": slot_time,
+                            "doctor": "Poliklinik Hekimi"
+                        })
+
+            logger.info(f"Retrieved {len(slots)} free slots for polyclinic {polyclinic_id}.")
             return slots
 
         except Exception as e:
-            logger.error(f"Error checking slots: {e}")
+            logger.error(f"Error checking slots: {e}", exc_info=True)
             return []
 
     def book_appointment(self, specialty_id, polyclinic_id, slot_id, tc_kimlik, dogum_tarihi, telefon):
-        """Step 5: Submits the personal details and completes the booking"""
+        """Step 5: Submits personal details and completes the appointment reservation"""
+        self._reset_session()
         try:
-            # We must go through all the steps to select the slot
-            logger.info("Starting booking process...")
-            
+            logger.info(f"Starting booking reservation for specialty={specialty_id}, polyclinic={polyclinic_id}...")
+
             # Step 1
             r1 = self.session.get(f"{BASE_URL}/1", headers=self.headers, timeout=15)
             token1 = self._get_forgery_token(r1.text)
+            if not token1:
+                return False, "Sistem güvenlik belirteci (token) alınamadı."
+
             post_headers1 = {
                 "Content-Type": "application/json; charset=utf-8",
                 "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/1"
             }
             self.session.post(f"{BASE_URL}/Step01/Operation", json={"param": 1}, headers={**self.headers, **post_headers1}, timeout=15)
-            
+
             # Step 2
-            r2 = self.session.get(f"{BASE_URL}/2", headers=self.headers, timeout=15)
-            token2 = self._get_forgery_token(r2.text) or token1
             post_headers2 = {
                 "Content-Type": "application/json; charset=utf-8",
-                "VerificationToken": token2,
+                "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/2"
             }
-            self.session.post(f"{BASE_URL}/Step02/Operation", json={"param": specialty_id}, headers={**self.headers, **post_headers2}, timeout=15)
-            
+            self.session.post(f"{BASE_URL}/Step02/Operation", json={"param": int(specialty_id)}, headers={**self.headers, **post_headers2}, timeout=15)
+
             # Step 3
-            r3 = self.session.get(f"{BASE_URL}/3", headers=self.headers, timeout=15)
-            token3 = self._get_forgery_token(r3.text) or token1
             post_headers3 = {
                 "Content-Type": "application/json; charset=utf-8",
-                "VerificationToken": token3,
+                "VerificationToken": token1,
                 "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/3"
             }
-            self.session.post(f"{BASE_URL}/Step03/Operation", json={"param": polyclinic_id}, headers={**self.headers, **post_headers3}, timeout=15)
-            
+            self.session.post(f"{BASE_URL}/Step03/Operation", json={"param": int(polyclinic_id)}, headers={**self.headers, **post_headers3}, timeout=15)
+
             # Step 4
             r4 = self.session.get(f"{BASE_URL}/4", headers=self.headers, timeout=15)
-            req_token = self._get_request_verification_token(r4.text)
-            
-            # Select the slot
-            logger.info(f"Selecting slot ID: {slot_id}")
+            req_token = self._get_request_verification_token(r4.text) or token1
+
+            # Select slot in Step 4
             slot_headers = {
                 "Content-Type": "application/json; charset=utf-8",
                 "VerificationToken": req_token,
@@ -320,61 +350,56 @@ class ADUScraper:
             }
             r_slot = self.session.post(
                 f"{BASE_URL}/Step04/Operation",
-                json={"param": slot_id},
+                json={"param": str(slot_id)},
                 headers={**self.headers, **slot_headers},
                 timeout=15
             )
-            
-            if not r_slot.json().get("IsStatus"):
-                logger.error(f"Slot ID {slot_id} selection rejected by Step 4")
-                return False, "Slot seçimi başarısız oldu (muhtemelen başkası tarafından alındı)."
 
-            # Step 5: Fetch confirmation page
-            logger.info("Fetching /5 confirmation page")
+            res_slot = r_slot.json() if r_slot.text else {}
+            if not res_slot.get("IsStatus"):
+                logger.error(f"Slot selection rejected: {res_slot}")
+                return False, "Slot seçimi başarısız oldu (muhtemelen bu randevu başkası tarafından alındı)."
+
+            # Step 5: GET /5
             r5 = self.session.get(f"{BASE_URL}/5", headers=self.headers, timeout=15)
-            token5 = self._get_forgery_token(r5.text)
-            
-            # Submit personal details!
-            # Typically, in Step 5 there is an AJAX action like /Step05/OperationAction or similar.
-            # Since we couldn't fetch real /5 earlier, we can inspect what the form inputs or scripts are.
-            # Based on standard MiaMed systems:
-            # POST /Step05/OperationAction or /Step05/Confirm
-            # Let's see what is inside Step 5 scripts in the response:
-            # Let's inspect the inline script of `/5` from soup5
-            logger.info("Submitting personal credentials to complete appointment...")
-            
-            # The submit details endpoint in MiaMed is /Step05/OperationAction
-            # Request body: {"tckimlik": tc_kimlik, "dogumtarihi": dogum_tarihi, "telefon": telefon}
+            token5 = self._get_forgery_token(r5.text) or req_token
+
+            # Extract dynamic security cookie parameter from Step05 button
+            m = RE_STEP05.search(r5.text)
+            cookie_param = m.group(1) if m else ""
+
+            # Prepare confirmation payload
             confirm_headers = {
                 "Content-Type": "application/json; charset=utf-8",
-                "VerificationToken": token5 or req_token,
+                "VerificationToken": token5,
                 "X-Requested-With": "XMLHttpRequest",
                 "Origin": BASE_URL,
                 "Referer": f"{BASE_URL}/5"
             }
-            
-            # Try to POST to /Step05/OperationAction
+
             confirm_data = {
-                "tckimlik": tc_kimlik,
-                "dogumtarihi": dogum_tarihi,
-                "telefon": telefon
+                "tckimlik": str(tc_kimlik).strip(),
+                "dogumtarihi": str(dogum_tarihi).strip(),
+                "cookie": cookie_param,
+                "ceptel": str(telefon).strip()
             }
-            
+
+            logger.info("Submitting personal details to /Step05/Operation...")
             r_confirm = self.session.post(
-                f"{BASE_URL}/Step05/OperationAction",
+                f"{BASE_URL}/Step05/Operation",
                 json=confirm_data,
                 headers={**self.headers, **confirm_headers},
                 timeout=15
             )
-            
-            res_data = r_confirm.json()
+
+            res_data = r_confirm.json() if r_confirm.text else {}
             logger.info(f"Confirm response: {res_data}")
-            
+
             if res_data.get("IsStatus"):
-                return True, res_data.get("IsMessage", "Randevunuz başarıyla alınmıştır.")
+                return True, res_data.get("IsMessage", "Randevunuz başarıyla onaylanıp alınmıştır.")
             else:
-                return False, res_data.get("IsMessage", "Randevu alımı sırasında hata oluştu.")
+                return False, res_data.get("IsMessage", "Randevu alımı sırasında hastane hatası oluştu.")
 
         except Exception as e:
-            logger.error(f"Error booking appointment: {e}")
-            return False, f"Randevu alma işlemi sırasında teknik bir hata oluştu: {str(e)}"
+            logger.error(f"Error booking appointment: {e}", exc_info=True)
+            return False, f"Randevu alma işlemi sırasında hata oluştu: {str(e)}"
